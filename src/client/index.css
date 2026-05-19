@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "DM Serif Display", Georgia, serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+
+  --color-cream: #faf8f4;
+  --color-cream-dark: #f0ece4;
+  --color-ink: #2c2c2a;
+  --color-ink-light: #5a5a55;
+  --color-ink-muted: #706e66;
+  --color-olive: #3d5a3e;
+  --color-olive-light: #5a7a5b;
+  --color-olive-bg: #e8efe8;
+  --color-sage: #a3b5a4;
+  --color-warm-border: #e5e0d8;
+  --color-terracotta: #c4603a;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-cream);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Global focus style */
+:focus-visible {
+  outline: 2px solid var(--color-olive);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Page transitions */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Stagger children */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Checkbox transition */
+.grocery-check {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+/* Motion-safe animations only */
+@media (prefers-reduced-motion: no-preference) {
+  .animate-page {
+    animation: fadeUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .stagger > * {
+    animation: fadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger > *:nth-child(2) { animation-delay: 50ms; }
+  .stagger > *:nth-child(3) { animation-delay: 100ms; }
+  .stagger > *:nth-child(4) { animation-delay: 150ms; }
+  .stagger > *:nth-child(5) { animation-delay: 200ms; }
+  .stagger > *:nth-child(6) { animation-delay: 250ms; }
+
+  .animate-slide-in {
+    animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}

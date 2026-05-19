@@ -1,0 +1,29 @@
+{
+  "name": "bare-recipe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.2",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.30.2",
+    "@cloudflare/workers-types": "^4.20260317.1",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.3",
+    "wrangler": "^4.78.0"
+  }
+}
