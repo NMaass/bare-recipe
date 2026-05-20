@@ -6,3 +6,4 @@ dist
 *.log
 .playwright-mcp/
 saved-empty.png
+dogfood-output/

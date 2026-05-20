@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import Nav from "./components/Nav";
 import Footer from "./components/Footer";
 import ExtractBar from "./components/ExtractBar";
 import RecipePage from "./pages/RecipePage";
@@ -16,7 +15,7 @@ export default function App() {
   }, [prefetch]);
 
   return (
-    <div className="min-h-screen flex flex-col pb-24">
+    <div className="min-h-screen flex flex-col">
       <ExtractBar />
       <main className="flex-1">
         <Routes>
@@ -28,7 +27,6 @@ export default function App() {
         </Routes>
       </main>
       <Footer />
-      <Nav />
     </div>
   );
 }

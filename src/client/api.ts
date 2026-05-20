@@ -1,4 +1,10 @@
-import type { Recipe, GroceryItem } from "../shared/types";
+import type {
+  Recipe,
+  GroceryItem,
+  ExtractResult,
+  ExtractError,
+  ExtractErrorReason,
+} from "../shared/types";
 
 function getDeviceId(): string {
   const key = "bare-recipe-device-id";
@@ -8,6 +14,18 @@ function getDeviceId(): string {
     localStorage.setItem(key, id);
   }
   return id;
+}
+
+// Lets callers display the typed reason without parsing the message string.
+export class ApiError extends Error {
+  reason: ExtractErrorReason | "unknown";
+  status: number;
+  constructor(message: string, reason: ExtractErrorReason | "unknown", status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.reason = reason;
+    this.status = status;
+  }
 }
 
 async function request<T>(
@@ -23,15 +41,26 @@ async function request<T>(
     },
   });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(body || res.statusText);
+    const text = await res.text();
+    let reason: ExtractErrorReason | "unknown" = "unknown";
+    let message = text || res.statusText;
+    try {
+      const parsed = JSON.parse(text) as Partial<ExtractError>;
+      if (parsed && typeof parsed === "object") {
+        if (parsed.reason) reason = parsed.reason;
+        if (parsed.error) message = parsed.error;
+      }
+    } catch {
+      // not JSON — keep the raw text as the message
+    }
+    throw new ApiError(message, reason, res.status);
   }
   return res.json();
 }
 
 export const api = {
   extractRecipe(url: string) {
-    return request<Recipe>("/extract", {
+    return request<ExtractResult>("/extract", {
       method: "POST",
       body: JSON.stringify({ url }),
     });
@@ -42,6 +71,8 @@ export const api = {
     return request<Recipe[]>(`/recipes${qs}`);
   },
 
+  // Kept for back-compat with the old "extract then save" flow. The new
+  // /api/extract already bookmarks; this is now an idempotent no-op-ish.
   saveRecipe(recipe: Recipe) {
     return request<Recipe>("/recipes", {
       method: "POST",

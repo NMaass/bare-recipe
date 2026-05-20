@@ -1,6 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
-import type { Recipe, Ingredient, Instruction, GroceryItem } from "../shared/types";
+import type { GroceryItem } from "../shared/types";
 
+// Per-device data isolation. This DO owns the user's bookmarks (pointers
+// into the shared D1 catalog) and grocery list. Recipe *content* lives in
+// the shared catalog — never in here — so the same URL extracted by two
+// devices doesn't waste storage and parser improvements roll out to everyone.
 export class UserStore extends DurableObject {
   sql: SqlStorage;
 
@@ -8,32 +12,19 @@ export class UserStore extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.migrate();
-    this.migrateV2();
   }
 
   private migrate() {
+    // Drop any pre-launch tables from earlier prototypes so we start clean.
+    // Safe because we're pre-launch; remove these DROPs once shipped.
+    this.sql.exec(`DROP TABLE IF EXISTS ingredients;`);
+    this.sql.exec(`DROP TABLE IF EXISTS instructions;`);
+    this.sql.exec(`DROP TABLE IF EXISTS recipes;`);
+
     this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS recipes (
-        id TEXT PRIMARY KEY,
-        url TEXT,
-        title TEXT,
-        image TEXT,
-        prep_time TEXT,
-        cook_time TEXT,
-        servings TEXT,
-        created_at INTEGER DEFAULT (unixepoch())
-      );
-      CREATE TABLE IF NOT EXISTS ingredients (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        recipe_id TEXT REFERENCES recipes(id) ON DELETE CASCADE,
-        text TEXT,
-        sort_order INTEGER
-      );
-      CREATE TABLE IF NOT EXISTS instructions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        recipe_id TEXT REFERENCES recipes(id) ON DELETE CASCADE,
-        step INTEGER,
-        text TEXT
+      CREATE TABLE IF NOT EXISTS bookmarks (
+        url_hash  TEXT PRIMARY KEY,
+        saved_at  INTEGER NOT NULL DEFAULT (unixepoch())
       );
       CREATE TABLE IF NOT EXISTS grocery_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,132 +37,42 @@ export class UserStore extends DurableObject {
     `);
   }
 
-  private migrateV2() {
-    // Add recipe_title column if missing (for existing DOs)
-    const cols = this.sql.exec("PRAGMA table_info(grocery_items)").toArray();
-    const hasTitle = cols.some((c) => c.name === "recipe_title");
-    if (!hasTitle) {
-      this.sql.exec("ALTER TABLE grocery_items ADD COLUMN recipe_title TEXT");
-    }
-  }
+  // ---------- Bookmarks ----------
 
-  async listRecipes(query?: string): Promise<Recipe[]> {
-    const q = query?.trim();
-    if (!q) {
-      const rows = this.sql
-        .exec("SELECT id, url, title, image, prep_time, cook_time, servings, created_at FROM recipes ORDER BY created_at DESC")
-        .toArray();
-      return rows.map((row) => this.buildRecipe(row));
-    }
-
-    // Match against title and any ingredient text. Escape LIKE wildcards so a
-    // literal "%" in the query doesn't blow up the search.
-    const pattern = `%${q.replace(/[\\%_]/g, (m) => "\\" + m)}%`;
-    const rows = this.sql
-      .exec(
-        `SELECT DISTINCT r.id, r.url, r.title, r.image, r.prep_time, r.cook_time, r.servings, r.created_at
-         FROM recipes r
-         LEFT JOIN ingredients i ON i.recipe_id = r.id
-         WHERE r.title LIKE ? ESCAPE '\\' OR i.text LIKE ? ESCAPE '\\'
-         ORDER BY r.created_at DESC`,
-        pattern,
-        pattern
-      )
-      .toArray();
-    return rows.map((row) => this.buildRecipe(row));
-  }
-
-  async getRecipe(id: string): Promise<Recipe | null> {
-    const rows = this.sql
-      .exec("SELECT id, url, title, image, prep_time, cook_time, servings, created_at FROM recipes WHERE id = ?", id)
-      .toArray();
-
-    if (rows.length === 0) return null;
-    return this.buildRecipe(rows[0]);
-  }
-
-  private buildRecipe(row: Record<string, SqlStorageValue>): Recipe {
-    const id = row.id as string;
-
-    const ingredientRows = this.sql
-      .exec("SELECT id, text, sort_order FROM ingredients WHERE recipe_id = ? ORDER BY sort_order", id)
-      .toArray();
-
-    const instructionRows = this.sql
-      .exec("SELECT id, step, text FROM instructions WHERE recipe_id = ? ORDER BY step", id)
-      .toArray();
-
-    return {
-      id,
-      url: row.url as string,
-      title: row.title as string,
-      image: (row.image as string) || null,
-      prepTime: (row.prep_time as string) || null,
-      cookTime: (row.cook_time as string) || null,
-      servings: (row.servings as string) || null,
-      createdAt: row.created_at as number,
-      ingredients: ingredientRows.map((r) => ({
-        id: r.id as number,
-        text: r.text as string,
-        sortOrder: r.sort_order as number,
-      })),
-      instructions: instructionRows.map((r) => ({
-        id: r.id as number,
-        step: r.step as number,
-        text: r.text as string,
-      })),
-    };
-  }
-
-  async saveRecipe(recipe: Recipe): Promise<Recipe> {
+  // Idempotent: re-bookmarking an existing URL preserves the original
+  // saved_at so the list order doesn't jump around when a user re-extracts.
+  async addBookmark(urlHash: string): Promise<void> {
     this.sql.exec(
-      "INSERT OR REPLACE INTO recipes (id, url, title, image, prep_time, cook_time, servings) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      recipe.id,
-      recipe.url,
-      recipe.title,
-      recipe.image,
-      recipe.prepTime,
-      recipe.cookTime,
-      recipe.servings
+      "INSERT OR REPLACE INTO bookmarks (url_hash, saved_at) VALUES (?, COALESCE((SELECT saved_at FROM bookmarks WHERE url_hash = ?), unixepoch()))",
+      urlHash,
+      urlHash
     );
-
-    // Clear existing related rows in case of replace
-    this.sql.exec("DELETE FROM ingredients WHERE recipe_id = ?", recipe.id);
-    this.sql.exec("DELETE FROM instructions WHERE recipe_id = ?", recipe.id);
-
-    for (const ing of recipe.ingredients) {
-      this.sql.exec(
-        "INSERT INTO ingredients (recipe_id, text, sort_order) VALUES (?, ?, ?)",
-        recipe.id,
-        ing.text,
-        ing.sortOrder
-      );
-    }
-
-    for (const inst of recipe.instructions) {
-      this.sql.exec(
-        "INSERT INTO instructions (recipe_id, step, text) VALUES (?, ?, ?)",
-        recipe.id,
-        inst.step,
-        inst.text
-      );
-    }
-
-    return (await this.getRecipe(recipe.id))!;
   }
 
-  async deleteRecipe(id: string): Promise<void> {
-    this.sql.exec("DELETE FROM recipes WHERE id = ?", id);
+  async removeBookmark(urlHash: string): Promise<void> {
+    this.sql.exec("DELETE FROM bookmarks WHERE url_hash = ?", urlHash);
   }
+
+  // Newest-first. Returns just the keys — the Worker hydrates content from
+  // the D1 catalog and combines upstream.
+  async listBookmarks(): Promise<{ urlHash: string; savedAt: number }[]> {
+    const rows = this.sql
+      .exec("SELECT url_hash, saved_at FROM bookmarks ORDER BY saved_at DESC")
+      .toArray();
+    return rows.map((row) => ({
+      urlHash: row.url_hash as string,
+      savedAt: row.saved_at as number,
+    }));
+  }
+
+  // ---------- Grocery list ----------
 
   async getGroceryList(): Promise<GroceryItem[]> {
     const rows = this.sql
       .exec(
-        `SELECT g.id, g.text, g.recipe_id, g.checked, g.added_at,
-                COALESCE(g.recipe_title, r.title) as recipe_title
-         FROM grocery_items g
-         LEFT JOIN recipes r ON g.recipe_id = r.id
-         ORDER BY g.added_at DESC`
+        `SELECT id, text, recipe_id, recipe_title, checked, added_at
+         FROM grocery_items
+         ORDER BY added_at DESC`
       )
       .toArray();
 
@@ -185,7 +86,9 @@ export class UserStore extends DurableObject {
     }));
   }
 
-  async addToGrocery(items: { text: string; recipeId: string; recipeTitle?: string }[]): Promise<GroceryItem[]> {
+  async addToGrocery(
+    items: { text: string; recipeId: string; recipeTitle?: string }[]
+  ): Promise<GroceryItem[]> {
     for (const item of items) {
       this.sql.exec(
         "INSERT INTO grocery_items (text, recipe_id, recipe_title) VALUES (?, ?, ?)",

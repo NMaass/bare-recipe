@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { usePageTitle } from "../utils";
+import NavTabs from "../components/NavTabs";
 
 export default function GroceryPage() {
   const {
@@ -13,12 +14,17 @@ export default function GroceryPage() {
     clearAllGrocery,
   } = useStore();
   const [confirmingClearAll, setConfirmingClearAll] = useState(false);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => { usePageTitle("Grocery"); }, []);
+  usePageTitle("Grocery");
 
   useEffect(() => {
     loadGroceryList();
   }, [loadGroceryList]);
+
+  useEffect(() => () => {
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+  }, []);
 
   const uncheckedCount = groceryItems.filter((i) => !i.checked).length;
   const hasChecked = groceryItems.some((item) => item.checked);
@@ -33,10 +39,8 @@ export default function GroceryPage() {
   if (groceryItems.length === 0) {
     return (
       <div className="max-w-xl mx-auto flex flex-col items-start justify-center min-h-[60vh] px-6 animate-page">
-        <p className="text-ink-muted text-sm font-medium tracking-wide uppercase mb-3">
-          Grocery list
-        </p>
-        <h2 className="font-serif text-3xl text-ink mb-2">All clear</h2>
+        <NavTabs />
+        <h1 className="font-serif text-3xl text-ink mt-2 mb-2">All clear</h1>
         <p className="text-ink-light text-base mb-6">
           Add ingredients from any recipe to build your shopping list.
         </p>
@@ -53,9 +57,13 @@ export default function GroceryPage() {
   const handleClearAll = async () => {
     if (!confirmingClearAll) {
       setConfirmingClearAll(true);
-      setTimeout(() => setConfirmingClearAll((cur) => (cur ? false : cur)), 3000);
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+      confirmTimer.current = setTimeout(() => {
+        setConfirmingClearAll((cur) => (cur ? false : cur));
+      }, 3000);
       return;
     }
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
     await clearAllGrocery();
     setConfirmingClearAll(false);
   };
@@ -65,12 +73,10 @@ export default function GroceryPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-5 pt-6 pb-6 animate-page">
+    <div className="max-w-xl mx-auto px-5 pt-6 pb-6 animate-page">
       <div className="flex items-baseline justify-between mb-5">
         <div>
-          <p className="text-ink-muted text-xs font-medium tracking-widest uppercase mb-1">
-            Grocery
-          </p>
+          <NavTabs />
           <h1 className="font-serif text-2xl text-ink">
             {uncheckedCount} item{uncheckedCount !== 1 ? "s" : ""}
           </h1>
@@ -87,6 +93,7 @@ export default function GroceryPage() {
           )}
           <button
             onClick={handleClearAll}
+            aria-live="polite"
             className={`text-xs font-medium tracking-wide uppercase px-2.5 py-2 rounded-md transition-colors ${
               confirmingClearAll
                 ? "text-terracotta bg-terracotta/10"
@@ -109,7 +116,7 @@ export default function GroceryPage() {
                   <span className="text-xs text-ink-muted">
                     {unchecked}/{items.length}
                   </span>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-ink-muted transition-transform group-open:rotate-180" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-ink-soft transition-transform group-open:rotate-180" aria-hidden="true">
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
                 </span>
@@ -120,7 +127,6 @@ export default function GroceryPage() {
                     <button
                       role="checkbox"
                       aria-checked={item.checked}
-                      aria-label={item.text}
                       onClick={() => toggleGroceryItem(item.id)}
                       className="flex-1 flex items-center gap-3 py-3 px-3 min-h-[44px] text-left transition-colors"
                     >
@@ -129,7 +135,7 @@ export default function GroceryPage() {
                         className={`grocery-check flex items-center justify-center h-[18px] w-[18px] rounded border-[1.5px] shrink-0 ${
                           item.checked
                             ? "bg-olive border-olive"
-                            : "border-ink-muted/30"
+                            : "border-ink-faint"
                         }`}
                       >
                         {item.checked && (
@@ -149,7 +155,7 @@ export default function GroceryPage() {
                     <button
                       onClick={() => removeGroceryItem(item.id)}
                       aria-label={`Remove ${item.text}`}
-                      className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-muted/40 hover:text-terracotta transition-colors"
+                      className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-faint hover:text-terracotta transition-colors"
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />

@@ -2,13 +2,15 @@
 
 @theme {
   --font-serif: "DM Serif Display", Georgia, serif;
-  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-sans: "Manrope", system-ui, sans-serif;
 
   --color-cream: #faf8f4;
   --color-cream-dark: #f0ece4;
   --color-ink: #2c2c2a;
   --color-ink-light: #5a5a55;
   --color-ink-muted: #706e66;
+  --color-ink-soft: #8a877e;
+  --color-ink-faint: #b0ad9f;
   --color-olive: #3d5a3e;
   --color-olive-light: #5a7a5b;
   --color-olive-bg: #e8efe8;
@@ -75,6 +77,11 @@ body {
   .stagger > *:nth-child(4) { animation-delay: 150ms; }
   .stagger > *:nth-child(5) { animation-delay: 200ms; }
   .stagger > *:nth-child(6) { animation-delay: 250ms; }
+  .stagger > *:nth-child(7) { animation-delay: 280ms; }
+  .stagger > *:nth-child(8) { animation-delay: 305ms; }
+  .stagger > *:nth-child(9) { animation-delay: 325ms; }
+  .stagger > *:nth-child(10) { animation-delay: 340ms; }
+  .stagger > *:nth-child(n+11) { animation-delay: 350ms; }
 
   .animate-slide-in {
     animation: slideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;

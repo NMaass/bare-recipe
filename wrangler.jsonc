@@ -23,5 +23,17 @@
       "tag": "v1",
       "new_sqlite_classes": ["UserStore"]
     }
+  ],
+  // Shared recipe catalog keyed by canonical URL hash. Lets us return cached
+  // recipes instantly when any user re-extracts a known URL, and decouples
+  // recipe content from per-device bookmarks. Create the database once with:
+  //   bunx wrangler d1 create bare-recipe-catalog
+  // then paste the returned database_id below.
+  "d1_databases": [
+    {
+      "binding": "CATALOG",
+      "database_name": "bare-recipe-catalog",
+      "database_id": "4dc789ed-8c6e-40fe-ad4a-46df71f2242b"
+    }
   ]
 }

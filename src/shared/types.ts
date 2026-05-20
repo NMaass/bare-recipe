@@ -31,3 +31,31 @@ export interface GroceryItem {
   checked: boolean;
   addedAt: number;
 }
+
+// Returned from POST /api/extract.
+// `cacheHit` lets the UI show a subtle "already in the catalog" affordance and
+// distinguishes a paid-for fetch from a free lookup. `extractorVersion` is the
+// version that produced this row — the catalog reads it on every request and
+// re-parses on a bump.
+export interface ExtractResult {
+  recipe: Recipe;
+  cacheHit: boolean;
+  extractorVersion: number;
+}
+
+// Distinct failure modes the client should surface differently. A "blocked"
+// response (the site returned a captcha/challenge page) is recoverable by the
+// user with a different source; "no_recipe" means we reached the page but it
+// has no machine-readable recipe data; "unreachable" is a network failure.
+export type ExtractErrorReason =
+  | "invalid_url"
+  | "unreachable"
+  | "blocked"
+  | "no_recipe"
+  | "too_large"
+  | "internal";
+
+export interface ExtractError {
+  error: string;
+  reason: ExtractErrorReason;
+}

@@ -2,11 +2,16 @@ import { create } from "zustand";
 import type { Recipe, GroceryItem } from "../shared/types";
 import { api } from "./api";
 
+// Visible state during extract so the UI can show progressive feedback
+// instead of a single opaque spinner.
+export type ExtractPhase = "idle" | "fetching" | "saved" | "cached";
+
 interface Store {
   currentRecipe: Recipe | null;
   savedRecipes: Recipe[];
   groceryItems: GroceryItem[];
   extracting: boolean;
+  extractPhase: ExtractPhase;
   loading: boolean;
   prefetched: boolean;
 
@@ -28,17 +33,32 @@ export const useStore = create<Store>((set, get) => ({
   savedRecipes: [],
   groceryItems: [],
   extracting: false,
+  extractPhase: "idle",
   loading: false,
   prefetched: false,
 
   extractAndSave: async (url) => {
-    set({ extracting: true });
+    set({ extracting: true, extractPhase: "fetching" });
     try {
-      const recipe = await api.extractRecipe(url);
-      const saved = await api.saveRecipe(recipe);
-      set({ currentRecipe: saved });
+      const result = await api.extractRecipe(url);
+      // /api/extract now auto-bookmarks server-side. The extra POST /api/recipes
+      // is a back-compat idempotent no-op, so we just refresh the saved list.
+      set({
+        currentRecipe: result.recipe,
+        extractPhase: result.cacheHit ? "cached" : "saved",
+      });
       await get().loadSavedRecipes();
-      return saved;
+      // Briefly hold the success phase so the UI can flash a confirmation
+      // before resetting. The phase auto-clears so the caller doesn't have to.
+      setTimeout(() => {
+        if (get().extractPhase === "saved" || get().extractPhase === "cached") {
+          set({ extractPhase: "idle" });
+        }
+      }, 1500);
+      return result.recipe;
+    } catch (err) {
+      set({ extractPhase: "idle" });
+      throw err;
     } finally {
       set({ extracting: false });
     }

@@ -1,17 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { formatDuration, usePageTitle } from "../utils";
+import NavTabs from "../components/NavTabs";
 
 export default function SavedPage() {
   const { savedRecipes, loadSavedRecipes, deleteRecipe, setCurrentRecipe } = useStore();
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => { usePageTitle("Saved"); }, []);
+  usePageTitle("Saved");
 
-  // Debounce search input → server query.
   useEffect(() => {
     const handle = setTimeout(() => setDebouncedQuery(query), 200);
     return () => clearTimeout(handle);
@@ -21,16 +22,24 @@ export default function SavedPage() {
     loadSavedRecipes(debouncedQuery || undefined);
   }, [loadSavedRecipes, debouncedQuery]);
 
+  useEffect(() => () => {
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+  }, []);
+
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
     if (confirmingId !== id) {
       setConfirmingId(id);
-      setTimeout(() => setConfirmingId((cur) => (cur === id ? null : cur)), 3000);
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+      confirmTimer.current = setTimeout(() => {
+        setConfirmingId((cur) => (cur === id ? null : cur));
+      }, 3000);
       return;
     }
 
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
     setConfirmingId(null);
     await deleteRecipe(id);
   };
@@ -40,10 +49,8 @@ export default function SavedPage() {
   if (savedRecipes.length === 0 && !searching) {
     return (
       <div className="max-w-xl mx-auto flex flex-col items-start justify-center min-h-[60vh] px-6 animate-page">
-        <p className="text-ink-muted text-sm font-medium tracking-wide uppercase mb-3">
-          Saved recipes
-        </p>
-        <h2 className="font-serif text-3xl text-ink mb-2">Nothing yet</h2>
+        <NavTabs />
+        <h1 className="font-serif text-3xl text-ink mt-2 mb-2">Nothing yet</h1>
         <p className="text-ink-light text-base">
           Paste a recipe link above to save your first.
         </p>
@@ -53,9 +60,7 @@ export default function SavedPage() {
 
   return (
     <div className="max-w-xl mx-auto px-5 pt-6 pb-6 animate-page">
-      <p className="text-ink-muted text-xs font-medium tracking-widest uppercase mb-1">
-        Saved
-      </p>
+      <NavTabs />
       <h1 className="font-serif text-2xl text-ink mb-4">
         {searching
           ? `${savedRecipes.length} result${savedRecipes.length !== 1 ? "s" : ""}`
@@ -69,7 +74,7 @@ export default function SavedPage() {
           fill="none"
           stroke="currentColor"
           strokeWidth={1.5}
-          className="w-4 h-4 text-ink-muted absolute left-3 top-1/2 -translate-y-1/2"
+          className="w-4 h-4 text-ink-soft absolute left-3 top-1/2 -translate-y-1/2"
         >
           <circle cx="11" cy="11" r="7" />
           <path strokeLinecap="round" d="m20 20-3-3" />
@@ -80,7 +85,7 @@ export default function SavedPage() {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search saved recipes"
           aria-label="Search saved recipes"
-          className="w-full pl-9 pr-3 py-2.5 bg-cream-dark border border-warm-border text-ink placeholder:text-ink-muted/70 text-[14px] focus:outline-none focus:border-olive focus:ring-2 focus:ring-olive/30 transition-colors rounded-lg"
+          className="w-full pl-9 pr-3 py-3 bg-cream-dark border border-warm-border text-ink placeholder:text-ink-soft text-[14px] focus:outline-none focus:border-olive focus:ring-2 focus:ring-olive/30 transition-colors rounded-lg"
         />
       </div>
 
@@ -104,8 +109,11 @@ export default function SavedPage() {
                 className="w-16 h-16 rounded-md object-cover shrink-0"
               />
             ) : (
-              <div className="w-16 h-16 rounded-md bg-cream-dark shrink-0 flex items-center justify-center text-ink-muted/40 text-2xl" aria-hidden="true">
-                ~
+              <div
+                className="w-16 h-16 rounded-md bg-cream-dark shrink-0 flex items-center justify-center text-olive/60 font-serif text-3xl leading-none"
+                aria-hidden="true"
+              >
+                {recipe.title?.trim().charAt(0).toUpperCase() || "·"}
               </div>
             )}
             <div className="flex-1 min-w-0">
@@ -119,17 +127,18 @@ export default function SavedPage() {
                     recipe.cookTime && `Cook ${formatDuration(recipe.cookTime)}`,
                   ]
                     .filter(Boolean)
-                    .join(" \u00b7 ")}
+                    .join(" · ")}
                 </p>
               )}
             </div>
             <button
               onClick={(e) => handleDelete(recipe.id, e)}
               aria-label={confirmingId === recipe.id ? `Confirm delete ${recipe.title}` : `Delete ${recipe.title}`}
+              aria-live="polite"
               className={`min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 transition-colors rounded-md ${
                 confirmingId === recipe.id
                   ? "text-terracotta bg-terracotta/10"
-                  : "text-ink-muted/40 hover:text-terracotta"
+                  : "text-ink-faint hover:text-terracotta"
               }`}
             >
               {confirmingId === recipe.id ? (

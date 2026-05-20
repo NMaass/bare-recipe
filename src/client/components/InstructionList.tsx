@@ -11,7 +11,7 @@ export default function InstructionList({ instructions }: Props) {
         <li
           key={inst.id ?? i}
           className="flex gap-4 animate-slide-in"
-          style={{ animationDelay: `${i * 40}ms` }}
+          style={{ animationDelay: `${Math.min(i, 10) * 40}ms` }}
         >
           <span className="text-ink-muted text-sm font-medium tabular-nums mt-0.5 shrink-0 w-6 text-right">
             {inst.step}.

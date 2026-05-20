@@ -11,7 +11,7 @@ export default function IngredientList({ ingredients }: Props) {
         <li
           key={ing.id ?? i}
           className="py-2.5 text-[15px] text-ink leading-relaxed animate-slide-in"
-          style={{ animationDelay: `${i * 30}ms` }}
+          style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}
         >
           {ing.text}
         </li>
