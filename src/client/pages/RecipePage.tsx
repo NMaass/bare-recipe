@@ -32,9 +32,9 @@ export default function RecipePage() {
 
   if (!recipe) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] text-ink-muted px-6">
+      <div className="max-w-xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-ink-muted px-6">
         <p className="text-lg">No recipe loaded</p>
-        <p className="text-sm mt-1">Add one from the home page</p>
+        <p className="text-sm mt-1">Paste a link above to add one.</p>
       </div>
     );
   }
@@ -65,7 +65,7 @@ export default function RecipePage() {
   const hostname = recipe.url ? safeHostname(recipe.url) : null;
 
   return (
-    <div className="animate-page pb-6">
+    <div className="max-w-xl mx-auto animate-page pb-6">
       {recipe.image && (
         <img
           src={recipe.image}

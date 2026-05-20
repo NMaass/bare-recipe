@@ -4,3 +4,5 @@ dist
 .dev.vars
 .DS_Store
 *.log
+.playwright-mcp/
+saved-empty.png

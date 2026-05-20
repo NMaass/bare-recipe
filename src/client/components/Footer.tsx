@@ -2,7 +2,7 @@ import { LINKS } from "../links";
 
 export default function Footer() {
   return (
-    <footer className="px-6 pb-6 pt-10 text-center">
+    <footer className="max-w-xl mx-auto px-6 pb-6 pt-10 text-center">
       <div className="flex items-center justify-center gap-5 text-ink-muted">
         <a
           href={LINKS.website}

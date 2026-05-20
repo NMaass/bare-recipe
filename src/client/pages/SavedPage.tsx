@@ -6,12 +6,20 @@ import { formatDuration, usePageTitle } from "../utils";
 export default function SavedPage() {
   const { savedRecipes, loadSavedRecipes, deleteRecipe, setCurrentRecipe } = useStore();
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
 
   useEffect(() => { usePageTitle("Saved"); }, []);
 
+  // Debounce search input → server query.
   useEffect(() => {
-    loadSavedRecipes();
-  }, [loadSavedRecipes]);
+    const handle = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(handle);
+  }, [query]);
+
+  useEffect(() => {
+    loadSavedRecipes(debouncedQuery || undefined);
+  }, [loadSavedRecipes, debouncedQuery]);
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -27,34 +35,58 @@ export default function SavedPage() {
     await deleteRecipe(id);
   };
 
-  if (savedRecipes.length === 0) {
+  const searching = debouncedQuery.trim().length > 0;
+
+  if (savedRecipes.length === 0 && !searching) {
     return (
-      <div className="flex flex-col items-start justify-center min-h-[60vh] px-6 animate-page">
+      <div className="max-w-xl mx-auto flex flex-col items-start justify-center min-h-[60vh] px-6 animate-page">
         <p className="text-ink-muted text-sm font-medium tracking-wide uppercase mb-3">
           Saved recipes
         </p>
         <h2 className="font-serif text-3xl text-ink mb-2">Nothing yet</h2>
-        <p className="text-ink-light text-base mb-6">
-          Recipes you save will appear here for quick access.
+        <p className="text-ink-light text-base">
+          Paste a recipe link above to save your first.
         </p>
-        <Link
-          to="/"
-          className="text-olive font-medium text-sm underline underline-offset-4 hover:text-olive-light transition-colors"
-        >
-          Add your first recipe
-        </Link>
       </div>
     );
   }
 
   return (
-    <div className="px-5 pt-6 pb-6 animate-page">
+    <div className="max-w-xl mx-auto px-5 pt-6 pb-6 animate-page">
       <p className="text-ink-muted text-xs font-medium tracking-widest uppercase mb-1">
         Saved
       </p>
-      <h1 className="font-serif text-2xl text-ink mb-5">
-        {savedRecipes.length} recipe{savedRecipes.length !== 1 ? "s" : ""}
+      <h1 className="font-serif text-2xl text-ink mb-4">
+        {searching
+          ? `${savedRecipes.length} result${savedRecipes.length !== 1 ? "s" : ""}`
+          : `${savedRecipes.length} recipe${savedRecipes.length !== 1 ? "s" : ""}`}
       </h1>
+
+      <div className="relative mb-5">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          className="w-4 h-4 text-ink-muted absolute left-3 top-1/2 -translate-y-1/2"
+        >
+          <circle cx="11" cy="11" r="7" />
+          <path strokeLinecap="round" d="m20 20-3-3" />
+        </svg>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search saved recipes"
+          aria-label="Search saved recipes"
+          className="w-full pl-9 pr-3 py-2.5 bg-cream-dark border border-warm-border text-ink placeholder:text-ink-muted/70 text-[14px] focus:outline-none focus:border-olive focus:ring-2 focus:ring-olive/30 transition-colors rounded-lg"
+        />
+      </div>
+
+      {savedRecipes.length === 0 && searching && (
+        <p className="text-ink-muted text-sm">No matches for "{debouncedQuery}".</p>
+      )}
 
       <div className="space-y-3 stagger">
         {savedRecipes.map((recipe) => (

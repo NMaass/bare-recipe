@@ -12,7 +12,7 @@ interface Store {
 
   extractAndSave: (url: string) => Promise<Recipe>;
   setCurrentRecipe: (recipe: Recipe | null) => void;
-  loadSavedRecipes: () => Promise<void>;
+  loadSavedRecipes: (query?: string) => Promise<void>;
   deleteRecipe: (id: string) => Promise<void>;
   loadGroceryList: () => Promise<void>;
   addToGrocery: (recipeId: string, recipeTitle: string, items: string[]) => Promise<void>;
@@ -46,11 +46,11 @@ export const useStore = create<Store>((set, get) => ({
 
   setCurrentRecipe: (recipe) => set({ currentRecipe: recipe }),
 
-  loadSavedRecipes: async () => {
+  loadSavedRecipes: async (query) => {
     const hadData = get().savedRecipes.length > 0;
     if (!hadData) set({ loading: true });
     try {
-      const recipes = await api.getRecipes();
+      const recipes = await api.getRecipes(query);
       set({ savedRecipes: recipes });
     } finally {
       set({ loading: false });

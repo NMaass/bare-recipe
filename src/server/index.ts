@@ -23,6 +23,13 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+// Per-device data isolation without login:
+// The client mints a random UUID on first load (stored in localStorage) and
+// sends it as `X-Device-ID`. Each value maps to its own Durable Object, which
+// owns its own SQLite — so users never see each other's recipes or grocery
+// items. Anyone who clears storage or switches devices effectively becomes a
+// new user. If we ever need real auth, wrap the worker in Cloudflare Access
+// and key off the verified email instead of the header.
 function getUserStore(request: Request, env: Env): DurableObjectStub<UserStore> {
   const deviceId = request.headers.get("X-Device-ID") || "anonymous";
   const id = env.USER_STORE.idFromName(deviceId);
@@ -58,9 +65,9 @@ export default {
         return json(recipe);
       }
 
-      // GET /api/recipes
+      // GET /api/recipes  (optional ?q=)
       if (url.pathname === "/api/recipes" && request.method === "GET") {
-        const recipes = await store.listRecipes();
+        const recipes = await store.listRecipes(url.searchParams.get("q") || undefined);
         return json(recipes);
       }
 

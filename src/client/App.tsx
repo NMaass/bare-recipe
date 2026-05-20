@@ -1,8 +1,8 @@
 import { useEffect } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import Nav from "./components/Nav";
 import Footer from "./components/Footer";
-import HomePage from "./pages/HomePage";
+import ExtractBar from "./components/ExtractBar";
 import RecipePage from "./pages/RecipePage";
 import SavedPage from "./pages/SavedPage";
 import GroceryPage from "./pages/GroceryPage";
@@ -16,16 +16,19 @@ export default function App() {
   }, [prefetch]);
 
   return (
-    <main className="max-w-xl mx-auto min-h-screen pb-20">
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/recipe" element={<RecipePage />} />
-        <Route path="/recipe/:id" element={<RecipePage />} />
-        <Route path="/saved" element={<SavedPage />} />
-        <Route path="/grocery" element={<GroceryPage />} />
-      </Routes>
+    <div className="min-h-screen flex flex-col pb-24">
+      <ExtractBar />
+      <main className="flex-1">
+        <Routes>
+          <Route path="/" element={<Navigate to="/saved" replace />} />
+          <Route path="/recipe" element={<RecipePage />} />
+          <Route path="/recipe/:id" element={<RecipePage />} />
+          <Route path="/saved" element={<SavedPage />} />
+          <Route path="/grocery" element={<GroceryPage />} />
+        </Routes>
+      </main>
       <Footer />
       <Nav />
-    </main>
+    </div>
   );
 }

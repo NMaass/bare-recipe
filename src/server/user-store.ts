@@ -55,11 +55,29 @@ export class UserStore extends DurableObject {
     }
   }
 
-  async listRecipes(): Promise<Recipe[]> {
-    const rows = this.sql
-      .exec("SELECT id, url, title, image, prep_time, cook_time, servings, created_at FROM recipes ORDER BY created_at DESC")
-      .toArray();
+  async listRecipes(query?: string): Promise<Recipe[]> {
+    const q = query?.trim();
+    if (!q) {
+      const rows = this.sql
+        .exec("SELECT id, url, title, image, prep_time, cook_time, servings, created_at FROM recipes ORDER BY created_at DESC")
+        .toArray();
+      return rows.map((row) => this.buildRecipe(row));
+    }
 
+    // Match against title and any ingredient text. Escape LIKE wildcards so a
+    // literal "%" in the query doesn't blow up the search.
+    const pattern = `%${q.replace(/[\\%_]/g, (m) => "\\" + m)}%`;
+    const rows = this.sql
+      .exec(
+        `SELECT DISTINCT r.id, r.url, r.title, r.image, r.prep_time, r.cook_time, r.servings, r.created_at
+         FROM recipes r
+         LEFT JOIN ingredients i ON i.recipe_id = r.id
+         WHERE r.title LIKE ? ESCAPE '\\' OR i.text LIKE ? ESCAPE '\\'
+         ORDER BY r.created_at DESC`,
+        pattern,
+        pattern
+      )
+      .toArray();
     return rows.map((row) => this.buildRecipe(row));
   }
 

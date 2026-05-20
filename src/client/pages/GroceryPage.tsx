@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { usePageTitle } from "../utils";
@@ -12,27 +12,13 @@ export default function GroceryPage() {
     clearCheckedGrocery,
     clearAllGrocery,
   } = useStore();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [confirmingClearAll, setConfirmingClearAll] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { usePageTitle("Grocery"); }, []);
 
   useEffect(() => {
     loadGroceryList();
   }, [loadGroceryList]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-        setConfirmingClearAll(false);
-      }
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [menuOpen]);
 
   const uncheckedCount = groceryItems.filter((i) => !i.checked).length;
   const hasChecked = groceryItems.some((item) => item.checked);
@@ -46,7 +32,7 @@ export default function GroceryPage() {
 
   if (groceryItems.length === 0) {
     return (
-      <div className="flex flex-col items-start justify-center min-h-[60vh] px-6 animate-page">
+      <div className="max-w-xl mx-auto flex flex-col items-start justify-center min-h-[60vh] px-6 animate-page">
         <p className="text-ink-muted text-sm font-medium tracking-wide uppercase mb-3">
           Grocery list
         </p>
@@ -55,10 +41,10 @@ export default function GroceryPage() {
           Add ingredients from any recipe to build your shopping list.
         </p>
         <Link
-          to="/"
+          to="/saved"
           className="text-olive font-medium text-sm underline underline-offset-4 hover:text-olive-light transition-colors"
         >
-          Add a recipe
+          Browse saved recipes
         </Link>
       </div>
     );
@@ -67,20 +53,19 @@ export default function GroceryPage() {
   const handleClearAll = async () => {
     if (!confirmingClearAll) {
       setConfirmingClearAll(true);
+      setTimeout(() => setConfirmingClearAll((cur) => (cur ? false : cur)), 3000);
       return;
     }
     await clearAllGrocery();
     setConfirmingClearAll(false);
-    setMenuOpen(false);
   };
 
   const handleClearChecked = async () => {
     await clearCheckedGrocery();
-    setMenuOpen(false);
   };
 
   return (
-    <div className="px-5 pt-6 pb-6 animate-page">
+    <div className="max-w-3xl mx-auto px-5 pt-6 pb-6 animate-page">
       <div className="flex items-baseline justify-between mb-5">
         <div>
           <p className="text-ink-muted text-xs font-medium tracking-widest uppercase mb-1">
@@ -91,49 +76,25 @@ export default function GroceryPage() {
           </h1>
         </div>
 
-        <div className="relative" ref={menuRef}>
-          <button
-            onClick={() => {
-              setMenuOpen((v) => !v);
-              setConfirmingClearAll(false);
-            }}
-            aria-label="List options"
-            aria-expanded={menuOpen}
-            className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-muted hover:text-ink transition-colors rounded-md"
-          >
-            <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5" aria-hidden="true">
-              <circle cx="12" cy="5" r="1.5" />
-              <circle cx="12" cy="12" r="1.5" />
-              <circle cx="12" cy="19" r="1.5" />
-            </svg>
-          </button>
-          {menuOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 top-full mt-1 min-w-[180px] bg-cream border border-warm-border rounded-lg shadow-sm py-1 z-10 animate-slide-in"
+        <div className="flex items-center gap-2">
+          {hasChecked && (
+            <button
+              onClick={handleClearChecked}
+              className="text-xs font-medium tracking-wide text-ink-muted hover:text-ink uppercase px-2.5 py-2 rounded-md transition-colors"
             >
-              {hasChecked && (
-                <button
-                  role="menuitem"
-                  onClick={handleClearChecked}
-                  className="w-full text-left px-3 py-2 text-sm text-ink hover:bg-cream-dark transition-colors"
-                >
-                  Clear checked
-                </button>
-              )}
-              <button
-                role="menuitem"
-                onClick={handleClearAll}
-                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                  confirmingClearAll
-                    ? "text-terracotta bg-terracotta/10"
-                    : "text-terracotta hover:bg-terracotta/5"
-                }`}
-              >
-                {confirmingClearAll ? "Tap again to confirm" : "Clear all"}
-              </button>
-            </div>
+              Clear checked
+            </button>
           )}
+          <button
+            onClick={handleClearAll}
+            className={`text-xs font-medium tracking-wide uppercase px-2.5 py-2 rounded-md transition-colors ${
+              confirmingClearAll
+                ? "text-terracotta bg-terracotta/10"
+                : "text-terracotta hover:bg-terracotta/5"
+            }`}
+          >
+            {confirmingClearAll ? "Tap again" : "Clear all"}
+          </button>
         </div>
       </div>
 

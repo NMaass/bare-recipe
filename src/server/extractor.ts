@@ -68,11 +68,19 @@ function findRecipe(data: unknown): Record<string, unknown> | null {
 
 function mapToRecipe(data: Record<string, unknown>, url: string): Recipe {
   const ingredients: Ingredient[] = [];
-  const rawIngredients = data.recipeIngredient;
+  // Some sites publish `recipeIngredient`; a few use `ingredients` or object-form items.
+  const rawIngredients = data.recipeIngredient ?? data.ingredients;
   if (Array.isArray(rawIngredients)) {
     rawIngredients.forEach((item, i) => {
-      ingredients.push({ text: String(item), sortOrder: i });
+      const text = ingredientText(item);
+      if (text) ingredients.push({ text, sortOrder: i });
     });
+  } else if (typeof rawIngredients === "string") {
+    rawIngredients
+      .split(/\r?\n|;|·/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((text, i) => ingredients.push({ text, sortOrder: i }));
   }
 
   const instructions: Instruction[] = [];
@@ -113,6 +121,61 @@ function mapToRecipe(data: Record<string, unknown>, url: string): Recipe {
     ingredients,
     instructions,
   };
+}
+
+// Coerce a recipeIngredient entry into a clean "qty unit name" string.
+// Sites often publish object-form items (e.g. { name, quantity, unitText })
+// instead of plain strings — without this they fell through as "[object Object]"
+// and the weight/unit got dropped.
+function ingredientText(item: unknown): string {
+  if (typeof item === "string") return item.trim();
+  if (typeof item === "number") return String(item);
+  if (!item || typeof item !== "object") return "";
+
+  const obj = item as Record<string, unknown>;
+
+  // Prefer a pre-formatted string the publisher already built.
+  for (const key of ["text", "description"]) {
+    const v = obj[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+
+  const name = pickString(obj, ["name", "ingredient", "item", "label"]);
+
+  // Quantity + unit often live together in a QuantitativeValue
+  // (e.g. amount: { value: 2, unitText: "tbsp" }). Resolve them as a pair so
+  // we don't pull "2" from `amount.value` and then miss "tbsp" because the
+  // top-level object has no `unitText`.
+  let qty = "";
+  let unit = "";
+  for (const key of ["quantity", "amount", "value", "weight"]) {
+    const v = obj[key];
+    if (v == null) continue;
+    if (typeof v === "string" && v.trim()) { qty = v.trim(); break; }
+    if (typeof v === "number") { qty = String(v); break; }
+    if (typeof v === "object") {
+      const inner = v as Record<string, unknown>;
+      const innerVal = inner.value ?? inner.name;
+      if (typeof innerVal === "string" && innerVal.trim()) qty = innerVal.trim();
+      else if (typeof innerVal === "number") qty = String(innerVal);
+      unit = pickString(inner, ["unitText", "unit", "unitCode"]);
+      if (qty || unit) break;
+    }
+  }
+  if (!unit) unit = pickString(obj, ["unitText", "unit", "unitCode"]);
+
+  const parts = [qty, unit, name].filter(Boolean);
+  if (parts.length) return parts.join(" ").replace(/\s+/g, " ").trim();
+  return "";
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const v = obj[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number") return String(v);
+  }
+  return "";
 }
 
 function extractImage(image: unknown): string | null {

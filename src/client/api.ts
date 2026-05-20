@@ -37,8 +37,9 @@ export const api = {
     });
   },
 
-  getRecipes() {
-    return request<Recipe[]>("/recipes");
+  getRecipes(query?: string) {
+    const qs = query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+    return request<Recipe[]>(`/recipes${qs}`);
   },
 
   saveRecipe(recipe: Recipe) {
