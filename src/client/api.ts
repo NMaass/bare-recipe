@@ -43,15 +43,18 @@ async function request<T>(
   if (!res.ok) {
     const text = await res.text();
     let reason: ExtractErrorReason | "unknown" = "unknown";
-    let message = text || res.statusText;
+    let message = res.statusText || "Request failed";
     try {
       const parsed = JSON.parse(text) as Partial<ExtractError>;
       if (parsed && typeof parsed === "object") {
         if (parsed.reason) reason = parsed.reason;
-        if (parsed.error) message = parsed.error;
+        if (typeof parsed.error === "string" && parsed.error) message = parsed.error;
       }
     } catch {
-      // not JSON — keep the raw text as the message
+      // Not JSON. If the raw response looks like text the user could read
+      // (short, no markup), surface it; otherwise keep the statusText so we
+      // never paint a JSON blob or an HTML error page into the UI.
+      if (text && text.length < 200 && !/[<{]/.test(text)) message = text;
     }
     throw new ApiError(message, reason, res.status);
   }
