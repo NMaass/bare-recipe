@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import type { GroceryItem, ConsolidatedGroceryItem, GroceryItemSource, GroceryRecipe } from "../shared/types";
+import type { Recipe, Ingredient, Instruction, GroceryItem, ConsolidatedGroceryItem, GroceryItemSource, GroceryRecipe } from "../shared/types";
 import { parseIngredient, buildDisplayText } from "../shared/ingredient-parser";
 
 // Per-device data isolation. This DO owns the user's bookmarks (pointers
@@ -16,16 +16,27 @@ export class UserStore extends DurableObject {
   }
 
   private migrate() {
-    // Drop any pre-launch tables from earlier prototypes so we start clean.
-    // Safe because we're pre-launch; remove these DROPs once shipped.
+    // Drop obsolete normalized tables from earlier prototypes. Manual recipe
+    // content now lives in manual_recipes and remains scoped to this DO.
     this.sql.exec(`DROP TABLE IF EXISTS ingredients;`);
     this.sql.exec(`DROP TABLE IF EXISTS instructions;`);
-    this.sql.exec(`DROP TABLE IF EXISTS recipes;`);
 
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS bookmarks (
         url_hash  TEXT PRIMARY KEY,
         saved_at  INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+      CREATE TABLE IF NOT EXISTS manual_recipes (
+        id                TEXT PRIMARY KEY,
+        title             TEXT NOT NULL,
+        image             TEXT,
+        prep_time         TEXT,
+        cook_time         TEXT,
+        servings          TEXT,
+        ingredients_json  TEXT NOT NULL,
+        instructions_json TEXT NOT NULL,
+        created_at        INTEGER NOT NULL DEFAULT (unixepoch()),
+        updated_at        INTEGER NOT NULL DEFAULT (unixepoch())
       );
       CREATE TABLE IF NOT EXISTS grocery_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,6 +79,11 @@ export class UserStore extends DurableObject {
     this.sql.exec("DELETE FROM bookmarks WHERE url_hash = ?", urlHash);
   }
 
+  async removeSavedRecipe(id: string): Promise<void> {
+    this.sql.exec("DELETE FROM bookmarks WHERE url_hash = ?", id);
+    this.sql.exec("DELETE FROM manual_recipes WHERE id = ?", id);
+  }
+
   // Newest-first. Returns just the keys — the Worker hydrates content from
   // the D1 catalog and combines upstream.
   async listBookmarks(): Promise<{ urlHash: string; savedAt: number }[]> {
@@ -78,6 +94,97 @@ export class UserStore extends DurableObject {
       urlHash: row.url_hash as string,
       savedAt: row.saved_at as number,
     }));
+  }
+
+  // ---------- Private manual recipes ----------
+
+  async putManualRecipe(input: {
+    title: string;
+    servings: string | null;
+    prepTime: string | null;
+    cookTime: string | null;
+    ingredients: Ingredient[];
+    instructions: Instruction[];
+  }): Promise<Recipe> {
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    this.sql.exec(
+      `INSERT INTO manual_recipes (
+         id, title, image, prep_time, cook_time, servings,
+         ingredients_json, instructions_json, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      input.title,
+      null,
+      input.prepTime,
+      input.cookTime,
+      input.servings,
+      JSON.stringify(input.ingredients),
+      JSON.stringify(input.instructions),
+      now,
+      now
+    );
+    await this.addBookmark(id);
+    return {
+      id,
+      url: "",
+      title: input.title,
+      image: null,
+      prepTime: input.prepTime,
+      cookTime: input.cookTime,
+      servings: input.servings,
+      ingredients: input.ingredients,
+      instructions: input.instructions,
+      createdAt: now,
+    };
+  }
+
+  async getManualRecipe(id: string): Promise<Recipe | null> {
+    const rows = this.sql
+      .exec(
+        `SELECT id, title, image, prep_time, cook_time, servings,
+                ingredients_json, instructions_json, created_at
+         FROM manual_recipes
+         WHERE id = ?`,
+        id
+      )
+      .toArray() as {
+      id: string;
+      title: string;
+      image: string | null;
+      prep_time: string | null;
+      cook_time: string | null;
+      servings: string | null;
+      ingredients_json: string;
+      instructions_json: string;
+      created_at: number;
+    }[];
+    const row = rows[0];
+
+    if (!row) return null;
+    return {
+      id: row.id,
+      url: "",
+      title: row.title,
+      image: row.image,
+      prepTime: row.prep_time,
+      cookTime: row.cook_time,
+      servings: row.servings,
+      ingredients: JSON.parse(row.ingredients_json) as Ingredient[],
+      instructions: JSON.parse(row.instructions_json) as Instruction[],
+      createdAt: row.created_at,
+    };
+  }
+
+  async getManualRecipes(ids: string[]): Promise<Map<string, Recipe>> {
+    const out = new Map<string, Recipe>();
+    if (ids.length === 0) return out;
+
+    for (const id of ids) {
+      const recipe = await this.getManualRecipe(id);
+      if (recipe) out.set(id, recipe);
+    }
+    return out;
   }
 
   // ---------- Grocery list ----------

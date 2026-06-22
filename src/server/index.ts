@@ -1,12 +1,22 @@
 import { UserStore } from "./user-store";
-import { extractFromHtml, EXTRACTOR_VERSION, type ExtractedRecipe } from "./extractor";
+import { extractFromHtml, EXTRACTOR_VERSION } from "./extractor";
 import { fetchPage } from "./fetch-page";
 import { canonicalizeUrl, isSafeHost, urlHash } from "./url";
 import { getRecipe, getRecipes, putRecipe, searchRecipes } from "./catalog";
+import {
+  InputValidationError,
+  LIMITS,
+  cleanString,
+  readJsonBody,
+  validateExtractUrlBody,
+  validateGroceryItems,
+  validateGroceryTextPatch,
+  validateManualRecipe,
+  validateMultiplier,
+  validateRecipeId,
+  validationFailure,
+} from "./validation";
 import type {
-  Recipe,
-  Ingredient,
-  Instruction,
   ExtractResult,
   ExtractError,
   ExtractErrorReason,
@@ -18,40 +28,44 @@ interface Env {
   ASSETS: Fetcher;
   USER_STORE: DurableObjectNamespace<UserStore>;
   CATALOG: D1Database;
+  APP_ORIGIN?: string;
 }
 
-function corsHeaders(): Record<string, string> {
+function corsHeaders(request: Request, env: Env): Record<string, string> {
+  const requestOrigin = new URL(request.url).origin;
+  const origin = request.headers.get("Origin");
+  const allowedOrigin = origin && isAllowedOrigin(origin, requestOrigin, env)
+    ? origin
+    : env.APP_ORIGIN || requestOrigin;
   return {
-    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Origin": allowedOrigin,
+    "Vary": "Origin",
     "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-Device-ID",
   };
 }
 
-function json(data: unknown, status = 200): Response {
+function json(request: Request, env: Env, data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json", ...corsHeaders() },
+    headers: { "Content-Type": "application/json", ...corsHeaders(request, env) },
   });
 }
 
-function extractError(reason: ExtractErrorReason, message: string, status = 400): Response {
+function extractError(
+  request: Request,
+  env: Env,
+  reason: ExtractErrorReason,
+  message: string,
+  status = 400
+): Response {
   const body: ExtractError = { reason, error: message };
-  return json(body, status);
+  return json(request, env, body, status);
 }
 
-// Single shared store — "one big database."
-// Every request maps to the *same* Durable Object, so bookmarks and the
-// grocery list are shared across all devices: add a recipe on your laptop and
-// it shows up on your phone. There's no per-device isolation and no auth, so
-// anyone with the URL sees and edits the same list. The client still sends an
-// `X-Device-ID` header; we intentionally ignore it. If we ever want per-user
-// data again, wrap the worker in Cloudflare Access and key off the verified
-// email here instead of the constant.
-const SHARED_STORE_NAME = "global";
-
-function getUserStore(_request: Request, env: Env): DurableObjectStub<UserStore> {
-  const id = env.USER_STORE.idFromName(SHARED_STORE_NAME);
+async function getUserStore(request: Request, env: Env): Promise<DurableObjectStub<UserStore>> {
+  const userKey = await userStoreKey(request);
+  const id = env.USER_STORE.idFromName(userKey);
   return env.USER_STORE.get(id);
 }
 
@@ -60,32 +74,33 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders() });
+      return new Response(null, { status: 204, headers: corsHeaders(request, env) });
     }
 
     if (!url.pathname.startsWith("/api/")) {
       return env.ASSETS.fetch(request);
     }
 
+    if (isUnsafeMethod(request.method) && !originAllowedForRequest(request, env)) {
+      return json(request, env, { error: "Invalid request origin", reason: "invalid_input" }, 403);
+    }
+
     try {
-      const store = getUserStore(request, env);
+      const store = await getUserStore(request, env);
 
       // ---------- Extract ----------
       // POST /api/extract { url }
       // Cache-first: canonicalize → D1 lookup → on miss fetch+parse+write.
       // Auto-bookmarks for the current device so pasting a link is also "save."
       if (url.pathname === "/api/extract" && request.method === "POST") {
-        const body = (await request.json()) as { url?: string };
-        if (!body.url) {
-          return extractError("invalid_url", "URL is required");
-        }
+        const submittedUrl = validateExtractUrlBody(await readJsonBody(request));
 
-        const canonical = canonicalizeUrl(body.url);
+        const canonical = canonicalizeUrl(submittedUrl);
         if (!canonical) {
-          return extractError("invalid_url", "That doesn't look like a recipe URL");
+          return extractError(request, env, "invalid_url", "That doesn't look like a recipe URL");
         }
         if (!isSafeHost(canonical.host)) {
-          return extractError("invalid_url", "That host isn't allowed");
+          return extractError(request, env, "invalid_url", "That host isn't allowed");
         }
 
         const hash = await urlHash(canonical.canonical);
@@ -99,33 +114,54 @@ export default {
             cacheHit: true,
             extractorVersion: hit.extractorVersion,
           };
-          return json(result);
+          return json(request, env, result);
         }
 
         // Cache miss — fetch the origin.
         const fetched = await fetchPage(canonical.canonical);
         if ("reason" in fetched) {
-          return extractError(fetched.reason, friendlyMessage(fetched.reason, fetched.message), 502);
+          return extractError(request, env, fetched.reason, friendlyMessage(fetched.reason, fetched.message), 502);
         }
 
-        const parsed = extractFromHtml({ html: fetched.html, url: canonical.canonical });
+        const finalCanonical = canonicalizeUrl(fetched.finalUrl);
+        if (!finalCanonical || !isSafeHost(finalCanonical.host)) {
+          return extractError(request, env, "invalid_url", "The page redirected to an unsafe URL");
+        }
+
+        const finalHash = await urlHash(finalCanonical.canonical);
+        if (finalHash !== hash) {
+          const redirectedHit = await getRecipe(env.CATALOG, finalHash);
+          if (redirectedHit) {
+            await store.addBookmark(finalHash);
+            const result: ExtractResult = {
+              recipe: redirectedHit.recipe,
+              cacheHit: true,
+              extractorVersion: redirectedHit.extractorVersion,
+            };
+            return json(request, env, result);
+          }
+        }
+
+        const parsed = extractFromHtml({ html: fetched.html, url: finalCanonical.canonical });
         if (!parsed) {
           return extractError(
+            request,
+            env,
             "no_recipe",
             "Couldn't find recipe data on that page",
             422
           );
         }
 
-        const recipe = await putRecipe(env.CATALOG, hash, canonical.host, parsed);
-        await store.addBookmark(hash);
+        const recipe = await putRecipe(env.CATALOG, finalHash, finalCanonical.host, parsed);
+        await store.addBookmark(finalHash);
 
         const result: ExtractResult = {
           recipe,
           cacheHit: false,
           extractorVersion: EXTRACTOR_VERSION,
         };
-        return json(result, 201);
+        return json(request, env, result, 201);
       }
 
       // ---------- List recipes ----------
@@ -134,13 +170,29 @@ export default {
       // `q` does a LIKE search over title + ingredients_json, scoped to
       // this device's bookmark set.
       if (url.pathname === "/api/recipes" && request.method === "GET") {
-        const query = url.searchParams.get("q") || undefined;
+        const query = cleanOptionalQuery(url.searchParams.get("q"));
         const bookmarks = await store.listBookmarks();
         const hashes = bookmarks.map((b) => b.urlHash);
 
-        const recipes = query?.trim()
-          ? await searchRecipes(env.CATALOG, hashes, query)
-          : Array.from((await getRecipes(env.CATALOG, hashes)).values());
+        const catalogPromise = query?.trim()
+          ? searchRecipes(env.CATALOG, hashes, query)
+          : getRecipes(env.CATALOG, hashes).then((recipes) => [...recipes.values()]);
+        const [manualRecipes, catalogRecipes] = await Promise.all([
+          store.getManualRecipes(hashes),
+          catalogPromise,
+        ]);
+
+        let recipes = [...catalogRecipes, ...manualRecipes.values()];
+        if (query?.trim()) {
+          const normalizedQuery = query.trim().toLowerCase();
+          const manualMatches = [...manualRecipes.values()].filter((recipe) =>
+            recipe.title.toLowerCase().includes(normalizedQuery) ||
+            recipe.ingredients.some((ingredient) =>
+              ingredient.text.toLowerCase().includes(normalizedQuery)
+            )
+          );
+          recipes = [...catalogRecipes, ...manualMatches];
+        }
 
         // Sort by *bookmark time* so the user sees newly-saved recipes at the
         // top — not by when the catalog row was first extracted, which could
@@ -151,7 +203,7 @@ export default {
             (savedAtByHash.get(b.id) ?? 0) - (savedAtByHash.get(a.id) ?? 0)
         );
 
-        return json(recipes);
+        return json(request, env, recipes);
       }
 
       // ---------- Bookmark an already-extracted recipe ----------
@@ -160,66 +212,37 @@ export default {
       // auto-bookmarks — but it remains the explicit "save this URL I have
       // in hand" affordance.
       if (url.pathname === "/api/recipes" && request.method === "POST") {
-        const recipe = (await request.json()) as Recipe;
-        const hit = await getRecipe(env.CATALOG, recipe.id);
+        const body = await readJsonBody(request);
+        const id = validateRecipeId(
+          body && typeof body === "object" && !Array.isArray(body)
+            ? (body as Record<string, unknown>).id
+            : undefined,
+          "id"
+        );
+        const hit = await getRecipe(env.CATALOG, id);
         if (!hit) {
-          return extractError("no_recipe", "That recipe isn't in the catalog yet", 404);
+          return extractError(request, env, "no_recipe", "That recipe isn't in the catalog yet", 404);
         }
-        await store.addBookmark(recipe.id);
-        return json(hit.recipe, 201);
+        await store.addBookmark(id);
+        return json(request, env, hit.recipe, 201);
       }
 
       // ---------- Manual recipe entry ----------
       // POST /api/recipes/manual { title, ingredients[], instructions[], ... }
       if (url.pathname === "/api/recipes/manual" && request.method === "POST") {
-        const body = (await request.json()) as {
-          title?: string;
-          ingredients?: string[];
-          instructions?: string[];
-          servings?: string;
-          prepTime?: string;
-          cookTime?: string;
-        };
+        const body = validateManualRecipe(
+          await readJsonBody(request, LIMITS.manualRecipeBodyBytes)
+        );
+        const recipe = await store.putManualRecipe(body);
 
-        const id = crypto.randomUUID();
-        const ingredients: Ingredient[] = (body.ingredients || [])
-          .map((t) => t.trim())
-          .filter(Boolean)
-          .map((text, i) => ({ text, sortOrder: i }));
-        const instructions: Instruction[] = (body.instructions || [])
-          .map((t) => t.trim())
-          .filter(Boolean)
-          .map((text, i) => ({ step: i + 1, text }));
-
-        if (!body.title?.trim() || ingredients.length === 0) {
-          return extractError("invalid_url", "Title and at least one ingredient are required");
-        }
-
-        const parsed: ExtractedRecipe = {
-          url: "",
-          title: body.title.trim(),
-          image: null,
-          prepTime: body.prepTime?.trim() || null,
-          cookTime: body.cookTime?.trim() || null,
-          servings: body.servings?.trim() || null,
-          ingredients,
-          instructions,
-          prepMinutes: null,
-          cookMinutes: null,
-          totalMinutes: null,
-        };
-
-        const recipe = await putRecipe(env.CATALOG, id, "manual", parsed);
-        await store.addBookmark(id);
-
-        return json(recipe, 201);
+        return json(request, env, recipe, 201);
       }
 
       // DELETE /api/recipes/:id  (id is the url_hash)
       const recipeDeleteMatch = url.pathname.match(/^\/api\/recipes\/(.+)$/);
       if (recipeDeleteMatch && request.method === "DELETE") {
-        await store.removeBookmark(decodeURIComponent(recipeDeleteMatch[1]));
-        return json({ ok: true });
+        await store.removeSavedRecipe(validateRecipeId(decodeURIComponent(recipeDeleteMatch[1])));
+        return json(request, env, { ok: true });
       }
 
       // ---------- Grocery ----------
@@ -228,19 +251,17 @@ export default {
           store.getConsolidatedGroceryList(),
           store.getGroceryRecipes(),
         ]);
-        return json({ items, recipes });
+        return json(request, env, { items, recipes });
       }
 
       if (url.pathname === "/api/grocery" && request.method === "POST") {
-        const body = (await request.json()) as {
-          items: { text: string; recipeId: string; recipeTitle?: string }[];
-        };
-        await store.addToGrocery(body.items);
+        const items = validateGroceryItems(await readJsonBody(request));
+        await store.addToGrocery(items);
         const [consolidated, recipes] = await Promise.all([
           store.getConsolidatedGroceryList(),
           store.getGroceryRecipes(),
         ]);
-        return json({ items: consolidated, recipes }, 201);
+        return json(request, env, { items: consolidated, recipes }, 201);
       }
 
       if (url.pathname === "/api/grocery" && request.method === "DELETE") {
@@ -249,24 +270,24 @@ export default {
         } else {
           await store.clearCheckedGrocery();
         }
-        return json({ ok: true });
+        return json(request, env, { ok: true });
       }
 
       const groceryPatchMatch = url.pathname.match(/^\/api\/grocery\/(\d+)$/);
       if (groceryPatchMatch && request.method === "PATCH") {
-        const body = (await request.json()) as { text?: string };
-        if (body.text !== undefined) {
-          await store.updateGroceryItemText(Number(groceryPatchMatch[1]), body.text);
+        const text = validateGroceryTextPatch(await readJsonBody(request));
+        if (text !== null) {
+          await store.updateGroceryItemText(Number(groceryPatchMatch[1]), text);
         } else {
           await store.toggleGroceryItem(Number(groceryPatchMatch[1]));
         }
-        return json({ ok: true });
+        return json(request, env, { ok: true });
       }
 
       const groceryDeleteMatch = url.pathname.match(/^\/api\/grocery\/(\d+)$/);
       if (groceryDeleteMatch && request.method === "DELETE") {
         await store.deleteGroceryItem(Number(groceryDeleteMatch[1]));
-        return json({ ok: true });
+        return json(request, env, { ok: true });
       }
 
       const groceryRecipeMatch = url.pathname.match(
@@ -274,26 +295,29 @@ export default {
       );
       if (groceryRecipeMatch && request.method === "DELETE") {
         await store.removeRecipeFromGrocery(
-          decodeURIComponent(groceryRecipeMatch[1])
+          validateRecipeId(decodeURIComponent(groceryRecipeMatch[1]), "recipeId")
         );
-        return json({ ok: true });
+        return json(request, env, { ok: true });
       }
 
       if (groceryRecipeMatch && request.method === "PATCH") {
-        const body = (await request.json()) as { multiplier?: number };
-        if (typeof body.multiplier === "number" && body.multiplier > 0) {
+        const multiplier = validateMultiplier(await readJsonBody(request));
+        if (multiplier !== null) {
           await store.updateRecipeMultiplier(
-            decodeURIComponent(groceryRecipeMatch[1]),
-            body.multiplier
+            validateRecipeId(decodeURIComponent(groceryRecipeMatch[1]), "recipeId"),
+            multiplier
           );
         }
-        return json({ ok: true });
+        return json(request, env, { ok: true });
       }
 
-      return json({ error: "Not found" }, 404);
+      return json(request, env, { error: "Not found" }, 404);
     } catch (err) {
+      if (err instanceof InputValidationError) {
+        return json(request, env, validationFailure(err.issues), 400);
+      }
       const message = err instanceof Error ? err.message : "Internal server error";
-      return json({ error: message, reason: "internal" satisfies ExtractErrorReason }, 500);
+      return json(request, env, { error: message, reason: "internal" satisfies ExtractErrorReason }, 500);
     }
   },
 } satisfies ExportedHandler<Env>;
@@ -315,4 +339,54 @@ function friendlyMessage(reason: ExtractErrorReason, detail: string): string {
     default:
       return detail;
   }
+}
+
+function isUnsafeMethod(method: string): boolean {
+  return method === "POST" || method === "PATCH" || method === "DELETE";
+}
+
+function originAllowedForRequest(request: Request, env: Env): boolean {
+  const origin = request.headers.get("Origin");
+  if (!origin) return true;
+  return isAllowedOrigin(origin, new URL(request.url).origin, env);
+}
+
+function isAllowedOrigin(origin: string, requestOrigin: string, env: Env): boolean {
+  return origin === requestOrigin || (Boolean(env.APP_ORIGIN) && origin === env.APP_ORIGIN);
+}
+
+async function userStoreKey(request: Request): Promise<string> {
+  const accessEmail =
+    request.headers.get("Cf-Access-Authenticated-User-Email") ||
+    request.headers.get("CF-Access-Authenticated-User-Email");
+  if (accessEmail) return `access:${await stableKey(accessEmail.trim().toLowerCase())}`;
+
+  const deviceId = request.headers.get("X-Device-ID");
+  if (deviceId) {
+    const cleaned = deviceId.trim();
+    if (/^[a-zA-Z0-9_-]{1,128}$/.test(cleaned) || /^[0-9a-fA-F-]{36}$/.test(cleaned)) {
+      return `device:${cleaned}`;
+    }
+  }
+
+  return "anonymous";
+}
+
+async function stableKey(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .slice(0, 16)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function cleanOptionalQuery(value: string | null): string | undefined {
+  if (value === null) return undefined;
+  const cleaned = cleanString(value, {
+    field: "q",
+    max: 200,
+    required: false,
+  });
+  return cleaned || undefined;
 }

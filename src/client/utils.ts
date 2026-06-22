@@ -13,11 +13,37 @@ export function formatDuration(iso: string): string {
 
 export function safeHostname(url: string): string | null {
   try {
-    const host = new URL(url).hostname;
+    const parsed = new URL(url);
+    if (!isSafeHttpUrl(parsed)) return null;
+    const host = parsed.hostname;
     return host.startsWith("www.") ? host.slice(4) : host;
   } catch {
     return null;
   }
+}
+
+export function safeImageUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return isSafeHttpUrl(parsed) ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function safeOutboundUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return isSafeHttpUrl(parsed) ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function isSafeHttpUrl(url: URL): boolean {
+  return url.protocol === "https:" || url.protocol === "http:";
 }
 
 export function usePageTitle(title: string) {

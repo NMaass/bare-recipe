@@ -1,4 +1,5 @@
 import type { Recipe, Ingredient, Instruction } from "../shared/types";
+import { safeAbsoluteUrl } from "./url";
 
 // Bump when the parser changes in a way that should re-extract previously
 // cached rows. Stored in catalog.recipes.extractor_version; the route reads
@@ -357,7 +358,7 @@ function pickBestImage(value: unknown, base: string): string | null {
   const candidates = collectImages(value);
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => b.area - a.area);
-  return absolutize(candidates[0].url, base);
+  return safeAbsoluteUrl(candidates[0].url, base, { allowHttp: true });
 }
 
 interface ImageCandidate {
@@ -405,7 +406,7 @@ function extractOpenGraph(html: string, url: string): ExtractedRecipe | null {
   return {
     url,
     title: normalizeString(og.title || "Untitled Recipe"),
-    image: og.image ? absolutize(og.image, url) : null,
+    image: safeAbsoluteUrl(og.image, url, { allowHttp: true }),
     prepTime: null,
     cookTime: null,
     servings: null,
@@ -478,9 +479,10 @@ function heuristicTitle(html: string): string {
 
 function heuristicImage(html: string, url: string): string | null {
   const og = readOgTags(html);
-  if (og.image) return absolutize(og.image, url);
+  const ogImage = safeAbsoluteUrl(og.image, url, { allowHttp: true });
+  if (ogImage) return ogImage;
   const img = html.match(/<img[^>]*src=["']([^"']+)["'][^>]*>/i);
-  if (img) return absolutize(img[1], url);
+  if (img) return safeAbsoluteUrl(img[1], url, { allowHttp: true });
   return null;
 }
 

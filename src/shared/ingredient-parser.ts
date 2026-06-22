@@ -207,3 +207,35 @@ export function buildDisplayText(
   parts.push(name);
   return parts.join(" ").replace(/\s+/g, " ").trim();
 }
+
+export function scaleIngredientText(text: string, factor: number): string {
+  if (factor === 1) return text;
+
+  let s = text.trim();
+  for (const [unicode, ascii] of Object.entries(UNICODE_TO_ASCII)) {
+    s = s.replace(unicode, ascii);
+  }
+
+  const qtyMatch = s.match(/^(\d+(?:\s+\d+\/\d+)?|\d+\/\d+|\d*\.\d+)\s*/);
+  if (!qtyMatch) return text;
+
+  let quantity: number;
+  try {
+    quantity = new Fraction(qtyMatch[1].trim()).valueOf();
+  } catch {
+    return text;
+  }
+
+  const scaled = quantity * factor;
+  if (scaled <= 0) return text;
+
+  const scaledStr = formatQuantity(scaled);
+  const remainder = s.slice(qtyMatch[0].length);
+  return `${scaledStr} ${remainder}`.replace(/\s+/g, " ").trim();
+}
+
+export function parseServings(servings: string | null): number {
+  if (!servings) return 4;
+  const match = servings.match(/\d+/);
+  return match ? parseInt(match[0], 10) : 4;
+}

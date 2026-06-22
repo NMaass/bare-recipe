@@ -47,6 +47,32 @@ export interface CanonicalUrl {
   host: string;
 }
 
+export function isSafeUrl(input: string, options: { allowHttp?: boolean } = {}): boolean {
+  try {
+    const parsed = new URL(input);
+    if (parsed.protocol === "https:") return true;
+    if (options.allowHttp && parsed.protocol === "http:") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function safeAbsoluteUrl(
+  input: string | null | undefined,
+  base?: string,
+  options: { allowHttp?: boolean } = {}
+): string | null {
+  if (!input) return null;
+  try {
+    const parsed = base ? new URL(input, base) : new URL(input);
+    const href = parsed.toString();
+    return isSafeUrl(href, options) ? href : null;
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalizeUrl(input: string): CanonicalUrl | null {
   let parsed: URL;
   try {
