@@ -4,11 +4,13 @@ import { useStore } from "../store";
 import { formatDuration, safeImageUrl, usePageTitle } from "../utils";
 
 export default function SavedPage() {
-  const { savedRecipes, loadSavedRecipes, deleteRecipe, setCurrentRecipe } = useStore();
+  const { savedRecipes, loadSavedRecipes, deleteRecipe, setCurrentRecipe, addToGrocery } = useStore();
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [addedId, setAddedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const addedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   usePageTitle("Saved");
 
@@ -23,6 +25,7 @@ export default function SavedPage() {
 
   useEffect(() => () => {
     if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    if (addedTimer.current) clearTimeout(addedTimer.current);
   }, []);
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -41,6 +44,15 @@ export default function SavedPage() {
     if (confirmTimer.current) clearTimeout(confirmTimer.current);
     setConfirmingId(null);
     await deleteRecipe(id);
+  };
+
+  const handleAddToGrocery = async (recipeId: string, title: string, ingredients: string[], e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    await addToGrocery(recipeId, title, ingredients);
+    setAddedId(recipeId);
+    if (addedTimer.current) clearTimeout(addedTimer.current);
+    addedTimer.current = setTimeout(() => setAddedId(null), 2000);
   };
 
   const searching = debouncedQuery.trim().length > 0;
@@ -93,6 +105,8 @@ export default function SavedPage() {
       <div className="space-y-3 stagger">
         {savedRecipes.map((recipe) => {
           const imageUrl = safeImageUrl(recipe.image);
+          const isConfirming = confirmingId === recipe.id;
+          const isAdded = addedId === recipe.id;
           return (
             <Link
               key={recipe.id}
@@ -130,24 +144,47 @@ export default function SavedPage() {
                   </p>
                 )}
               </div>
-              <button
-                onClick={(e) => handleDelete(recipe.id, e)}
-                aria-label={confirmingId === recipe.id ? `Confirm delete ${recipe.title}` : `Delete ${recipe.title}`}
-                aria-live="polite"
-                className={`min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 transition-colors rounded-md ${
-                  confirmingId === recipe.id
-                    ? "text-terracotta bg-terracotta/10"
-                    : "text-ink-faint hover:text-terracotta"
-                }`}
-              >
-                {confirmingId === recipe.id ? (
-                  <span className="text-xs font-medium">Delete?</span>
-                ) : (
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />
-                  </svg>
-                )}
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={(e) => handleAddToGrocery(recipe.id, recipe.title, recipe.ingredients.map((i) => i.text), e)}
+                  aria-label={`Add ${recipe.title} to grocery list`}
+                  className={`w-9 h-9 flex items-center justify-center rounded-md transition-colors ${
+                    isAdded
+                      ? "text-olive bg-olive-bg"
+                      : "text-ink-faint hover:text-olive hover:bg-olive-bg"
+                  }`}
+                >
+                  {isAdded ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} className="w-4 h-4" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M20 6 9 17l-5-5" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16 10a4 4 0 0 1-8 0" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={(e) => handleDelete(recipe.id, e)}
+                  aria-label={isConfirming ? `Confirm delete ${recipe.title}` : `Delete ${recipe.title}`}
+                  aria-live="polite"
+                  className={`flex items-center justify-center rounded-md transition-colors ${
+                    isConfirming
+                      ? "text-terracotta bg-terracotta/10 px-2.5 h-9 text-xs font-medium"
+                      : "text-ink-faint hover:text-terracotta w-9 h-9"
+                  }`}
+                >
+                  {isConfirming ? (
+                    "Delete?"
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </Link>
           );
         })}

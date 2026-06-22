@@ -7,16 +7,16 @@ const tabs = [
 
 export default function NavTabs() {
   return (
-    <nav aria-label="Sections" className="flex items-center gap-3 text-xs font-medium tracking-widest uppercase mb-1">
+    <nav aria-label="Sections" className="flex items-center gap-1 text-sm font-semibold">
       {tabs.map((tab, i) => (
-        <span key={tab.to} className="flex items-center gap-3">
-          {i > 0 && <span aria-hidden="true" className="text-ink-faint">·</span>}
+        <span key={tab.to} className="flex items-center gap-1">
+          {i > 0 && <span aria-hidden="true" className="text-ink-faint mx-1">|</span>}
           <NavLink
             to={tab.to}
             className={({ isActive }) =>
               isActive
-                ? "text-ink"
-                : "text-ink-faint hover:text-ink-muted transition-colors"
+                ? "text-olive border-b-2 border-olive pb-0.5"
+                : "text-ink-faint hover:text-ink-muted border-b-2 border-transparent pb-0.5 transition-colors"
             }
           >
             {tab.label}

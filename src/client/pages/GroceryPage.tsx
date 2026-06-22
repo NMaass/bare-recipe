@@ -35,11 +35,12 @@ export default function GroceryPage() {
     if (confirmTimer.current) clearTimeout(confirmTimer.current);
   }, []);
 
-  const visibleItems = filterRecipeId
+  const visibleItems = (filterRecipeId
     ? groceryItems.filter((item) =>
         item.sources.some((s) => s.recipeId === filterRecipeId)
       )
-    : groceryItems;
+    : groceryItems
+  ).slice().sort((a, b) => a.name.localeCompare(b.name));
 
   const uncheckedCount = visibleItems.filter((i) => !i.checked).length;
   const totalCount = visibleItems.length;
@@ -290,11 +291,53 @@ export default function GroceryPage() {
                     {formatIngredientText(item.displayText)}
                   </span>
                 </button>
+                {!hasMultipleSources && editingId !== item.sources[0]?.itemId && (
+                  <div className="flex items-center shrink-0 pr-2">
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        startEdit(item.sources[0].itemId, item.sources[0].originalText);
+                      }}
+                      aria-label="Edit"
+                      className="w-9 h-9 flex items-center justify-center text-ink-faint hover:text-olive transition-colors"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        removeGroceryItem(item.sources[0].itemId);
+                      }}
+                      aria-label="Remove"
+                      className="w-9 h-9 flex items-center justify-center text-ink-faint hover:text-terracotta transition-colors"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+                {!hasMultipleSources && editingId === item.sources[0]?.itemId && (
+                  <div className="flex items-center gap-2 pr-3 py-2" onClick={(e) => e.preventDefault()}>
+                    <input
+                      type="text"
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveEdit();
+                        if (e.key === "Escape") cancelEdit();
+                      }}
+                      onBlur={saveEdit}
+                      autoFocus
+                      className="w-28 px-2 py-1.5 text-sm bg-cream border border-olive/30 rounded focus:outline-none focus:border-olive focus:ring-2 focus:ring-olive/20"
+                    />
+                  </div>
+                )}
                 {hasMultipleSources && (
-                  <span className="flex items-center gap-2 pr-4">
-                    <span className="text-xs text-ink-muted">
-                      {item.sources.length} {item.sources.length === 1 ? "recipe" : "recipes"}
-                    </span>
+                  <span className="flex items-center pr-4">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-ink-soft transition-transform group-open:rotate-180" aria-hidden="true">
                       <polyline points="6 9 12 15 18 9" />
                     </svg>
