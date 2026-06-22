@@ -32,6 +32,27 @@ export interface GroceryItem {
   addedAt: number;
 }
 
+export interface GroceryItemSource {
+  itemId: number;
+  recipeId: string | null;
+  recipeTitle?: string;
+  originalText: string;
+  quantity: number | null;
+  unit: string;
+  name: string;
+  checked: boolean;
+}
+
+export interface ConsolidatedGroceryItem {
+  key: string;
+  displayText: string;
+  quantity: number | null;
+  unit: string;
+  name: string;
+  checked: boolean;
+  sources: GroceryItemSource[];
+}
+
 // Returned from POST /api/extract.
 // `cacheHit` lets the UI show a subtle "already in the catalog" affordance and
 // distinguishes a paid-for fetch from a free lookup. `extractorVersion` is the

@@ -1,20 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { formatIngredientText, usePageTitle } from "../utils";
-import NavTabs from "../components/NavTabs";
+import { formatQuantity, formatUnit } from "../../shared/ingredient-parser";
 
 export default function GroceryPage() {
   const {
     groceryItems,
     loadGroceryList,
+    toggleGroceryGroup,
     toggleGroceryItem,
     removeGroceryItem,
+    removeRecipeFromGrocery,
+    updateGroceryItemText,
     clearCheckedGrocery,
     clearAllGrocery,
   } = useStore();
   const [confirmingClearAll, setConfirmingClearAll] = useState(false);
+  const [confirmingRecipe, setConfirmingRecipe] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recipeConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   usePageTitle("Grocery");
 
@@ -24,23 +31,28 @@ export default function GroceryPage() {
 
   useEffect(() => () => {
     if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    if (recipeConfirmTimer.current) clearTimeout(recipeConfirmTimer.current);
   }, []);
 
   const uncheckedCount = groceryItems.filter((i) => !i.checked).length;
   const totalCount = groceryItems.length;
   const hasChecked = groceryItems.some((item) => item.checked);
 
-  const groups = groceryItems.reduce<Record<string, typeof groceryItems>>((acc, item) => {
-    const key = item.recipeTitle || "Other";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(item);
-    return acc;
-  }, {});
+  const recipes = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of groceryItems) {
+      for (const source of item.sources) {
+        if (source.recipeId && source.recipeTitle) {
+          map.set(source.recipeId, source.recipeTitle);
+        }
+      }
+    }
+    return Array.from(map.entries()).map(([id, title]) => ({ id, title }));
+  }, [groceryItems]);
 
   if (groceryItems.length === 0) {
     return (
       <div className="max-w-xl mx-auto flex flex-col items-start justify-center min-h-[60vh] px-6 animate-page">
-        <NavTabs />
         <h1 className="font-serif text-3xl text-ink mt-2 mb-2">All clear</h1>
         <p className="text-ink-light text-base mb-6">
           Add ingredients from any recipe to build your shopping list.
@@ -73,17 +85,46 @@ export default function GroceryPage() {
     await clearCheckedGrocery();
   };
 
+  const handleRemoveRecipe = async (recipeId: string) => {
+    if (confirmingRecipe !== recipeId) {
+      setConfirmingRecipe(recipeId);
+      if (recipeConfirmTimer.current) clearTimeout(recipeConfirmTimer.current);
+      recipeConfirmTimer.current = setTimeout(() => {
+        setConfirmingRecipe((cur) => (cur === recipeId ? null : cur));
+      }, 3000);
+      return;
+    }
+    if (recipeConfirmTimer.current) clearTimeout(recipeConfirmTimer.current);
+    setConfirmingRecipe(null);
+    await removeRecipeFromGrocery(recipeId);
+  };
+
+  const startEdit = (itemId: number, currentText: string) => {
+    setEditingId(itemId);
+    setEditText(currentText);
+  };
+
+  const saveEdit = async () => {
+    if (editingId !== null && editText.trim()) {
+      await updateGroceryItemText(editingId, editText.trim());
+    }
+    setEditingId(null);
+    setEditText("");
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditText("");
+  };
+
   return (
     <div className="max-w-xl mx-auto px-5 pt-6 pb-6 animate-page">
       <div className="flex items-baseline justify-between mb-5">
-        <div>
-          <NavTabs />
-          <h1 className="font-serif text-2xl text-ink">
-            {uncheckedCount === 0
-              ? `All ${totalCount} checked`
-              : `${uncheckedCount} to buy`}
-          </h1>
-        </div>
+        <h1 className="font-serif text-2xl text-ink">
+          {uncheckedCount === 0
+            ? `All ${totalCount} checked`
+            : `${uncheckedCount} to buy`}
+        </h1>
 
         <div className="flex items-center gap-2">
           {hasChecked && (
@@ -108,65 +149,166 @@ export default function GroceryPage() {
         </div>
       </div>
 
+      {recipes.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-5">
+          {recipes.map((recipe) => (
+            <button
+              key={recipe.id}
+              onClick={() => handleRemoveRecipe(recipe.id)}
+              className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
+                confirmingRecipe === recipe.id
+                  ? "bg-terracotta/15 text-terracotta"
+                  : "bg-cream-dark text-ink-muted hover:bg-terracotta/10 hover:text-terracotta"
+              }`}
+            >
+              <span className="max-w-[180px] truncate">{recipe.title}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3 shrink-0" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-2 stagger">
-        {Object.entries(groups).map(([title, items]) => {
-          const unchecked = items.filter((i) => !i.checked).length;
+        {groceryItems.map((item) => {
+          const hasMultipleSources = item.sources.length > 1;
           return (
-            <details key={title} open className="group border border-warm-border rounded-lg">
-              <summary className="flex items-center justify-between px-4 py-3 cursor-pointer select-none min-h-[44px] hover:bg-cream-dark transition-colors rounded-lg">
-                <span className="font-medium text-sm text-ink">{title}</span>
-                <span className="flex items-center gap-2">
-                  <span className="text-xs text-ink-muted">
-                    {unchecked}/{items.length}
-                  </span>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-ink-soft transition-transform group-open:rotate-180" aria-hidden="true">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </span>
-              </summary>
-              <ul className="divide-y divide-warm-border/60 px-1">
-                {items.map((item) => (
-                  <li key={item.id} className="flex items-center">
-                    <button
-                      role="checkbox"
-                      aria-checked={item.checked}
-                      onClick={() => toggleGroceryItem(item.id)}
-                      className="flex-1 flex items-center gap-3 py-3 px-3 min-h-[44px] text-left transition-colors"
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={`grocery-check flex items-center justify-center h-[18px] w-[18px] rounded border-[1.5px] shrink-0 ${
-                          item.checked
-                            ? "bg-olive border-olive"
-                            : "border-ink-faint"
-                        }`}
-                      >
-                        {item.checked && (
-                          <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-2.5 h-2.5">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M20 6 9 17l-5-5" />
-                          </svg>
-                        )}
-                      </span>
-                      <span
-                        className={`text-[15px] transition-colors ${
-                          item.checked ? "text-ink-muted line-through" : "text-ink"
-                        }`}
-                      >
-                        {formatIngredientText(item.text)}
-                      </span>
-                    </button>
-                    <button
-                      onClick={() => removeGroceryItem(item.id)}
-                      aria-label={`Remove ${formatIngredientText(item.text)}`}
-                      className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-faint hover:text-terracotta transition-colors"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />
+            <details
+              key={item.key}
+              open={hasMultipleSources}
+              className="group border border-warm-border rounded-lg"
+            >
+              <summary className="flex items-center cursor-pointer select-none min-h-[44px] hover:bg-cream-dark transition-colors rounded-lg">
+                <button
+                  role="checkbox"
+                  aria-checked={item.checked}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    toggleGroceryGroup(item.key);
+                  }}
+                  className="flex items-center gap-3 py-3 px-4 flex-1 text-left transition-colors"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`grocery-check flex items-center justify-center h-[18px] w-[18px] rounded border-[1.5px] shrink-0 ${
+                      item.checked
+                        ? "bg-olive border-olive"
+                        : "border-ink-faint"
+                    }`}
+                  >
+                    {item.checked && (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-2.5 h-2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M20 6 9 17l-5-5" />
                       </svg>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                    )}
+                  </span>
+                  <span
+                    className={`text-[15px] transition-colors flex-1 ${
+                      item.checked ? "text-ink-muted line-through" : "text-ink"
+                    }`}
+                  >
+                    {formatIngredientText(item.displayText)}
+                  </span>
+                </button>
+                {hasMultipleSources && (
+                  <span className="flex items-center gap-2 pr-4">
+                    <span className="text-xs text-ink-muted">
+                      {item.sources.length} recipes
+                    </span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-ink-soft transition-transform group-open:rotate-180" aria-hidden="true">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </span>
+                )}
+              </summary>
+              {hasMultipleSources && (
+                <ul className="divide-y divide-warm-border/60 px-1 pb-1">
+                  {item.sources.map((source) => (
+                    <li key={source.itemId} className="flex items-center px-3">
+                      {editingId === source.itemId ? (
+                        <div className="flex-1 flex items-center gap-2 py-2">
+                          <input
+                            type="text"
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveEdit();
+                              if (e.key === "Escape") cancelEdit();
+                            }}
+                            onBlur={saveEdit}
+                            autoFocus
+                            className="flex-1 px-2 py-1.5 text-sm bg-cream border border-olive/30 rounded focus:outline-none focus:border-olive focus:ring-2 focus:ring-olive/20"
+                          />
+                          <button
+                            onClick={saveEdit}
+                            className="text-xs font-medium text-olive px-2 py-1"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          role="checkbox"
+                          aria-checked={source.checked}
+                          onClick={() => toggleGroceryItem(source.itemId)}
+                          className="flex-1 flex items-center gap-2 py-2.5 px-2 min-h-[40px] text-left transition-colors"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`flex items-center justify-center h-[14px] w-[14px] rounded border shrink-0 ${
+                              source.checked
+                                ? "bg-olive border-olive"
+                                : "border-ink-faint"
+                            }`}
+                          >
+                            {source.checked && (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-2 h-2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M20 6 9 17l-5-5" />
+                              </svg>
+                            )}
+                          </span>
+                          <span className={`text-xs flex-1 ${
+                            source.checked ? "text-ink-muted line-through" : "text-ink-light"
+                          }`}>
+                            {source.quantity !== null && source.quantity > 0
+                              ? `${formatQuantity(source.quantity)} ${formatUnit(source.unit, source.quantity)}`
+                              : formatIngredientText(source.originalText)}
+                          </span>
+                          {source.recipeTitle && (
+                            <span className="text-xs text-ink-faint shrink-0 max-w-[120px] truncate">
+                              {source.recipeTitle}
+                            </span>
+                          )}
+                        </button>
+                      )}
+                      <div className="flex items-center shrink-0">
+                        {editingId !== source.itemId && (
+                          <button
+                            onClick={() => startEdit(source.itemId, source.originalText)}
+                            aria-label="Edit"
+                            className="min-w-[36px] min-h-[36px] flex items-center justify-center text-ink-faint hover:text-olive transition-colors"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5" aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => removeGroceryItem(source.itemId)}
+                          aria-label="Remove"
+                          className="min-w-[36px] min-h-[36px] flex items-center justify-center text-ink-faint hover:text-terracotta transition-colors"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5" aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </details>
           );
         })}

@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import type { GroceryItem } from "../shared/types";
+import type { GroceryItem, ConsolidatedGroceryItem, GroceryItemSource } from "../shared/types";
+import { parseIngredient, buildDisplayText } from "../shared/ingredient-parser";
 
 // Per-device data isolation. This DO owns the user's bookmarks (pointers
 // into the shared D1 catalog) and grocery list. Recipe *content* lives in
@@ -86,6 +87,52 @@ export class UserStore extends DurableObject {
     }));
   }
 
+  async getConsolidatedGroceryList(): Promise<ConsolidatedGroceryItem[]> {
+    const items = await this.getGroceryList();
+    const groups = new Map<string, GroceryItemSource[]>();
+
+    for (const item of items) {
+      const parsed = parseIngredient(item.text);
+      const existing = groups.get(parsed.key) || [];
+      existing.push({
+        itemId: item.id,
+        recipeId: item.recipeId,
+        recipeTitle: item.recipeTitle,
+        originalText: item.text,
+        quantity: parsed.quantity,
+        unit: parsed.unit,
+        name: parsed.name,
+        checked: item.checked,
+      });
+      groups.set(parsed.key, existing);
+    }
+
+    const out: ConsolidatedGroceryItem[] = [];
+    for (const [key, sources] of groups) {
+      const totalQuantity = sources.reduce(
+        (sum, s) => sum + (s.quantity ?? 0),
+        0
+      );
+      const hasAnyQuantity = sources.some((s) => s.quantity !== null);
+      const quantity = hasAnyQuantity ? totalQuantity : null;
+      const unit = sources[0]?.unit || "";
+      const name = sources[0]?.name || sources[0]?.originalText || "";
+      const allChecked = sources.every((s) => s.checked);
+
+      out.push({
+        key,
+        displayText: buildDisplayText(quantity, unit, name),
+        quantity,
+        unit,
+        name,
+        checked: allChecked,
+        sources,
+      });
+    }
+
+    return out;
+  }
+
   async addToGrocery(
     items: { text: string; recipeId: string; recipeTitle?: string }[]
   ): Promise<GroceryItem[]> {
@@ -109,6 +156,14 @@ export class UserStore extends DurableObject {
 
   async deleteGroceryItem(id: number): Promise<void> {
     this.sql.exec("DELETE FROM grocery_items WHERE id = ?", id);
+  }
+
+  async removeRecipeFromGrocery(recipeId: string): Promise<void> {
+    this.sql.exec("DELETE FROM grocery_items WHERE recipe_id = ?", recipeId);
+  }
+
+  async updateGroceryItemText(id: number, text: string): Promise<void> {
+    this.sql.exec("UPDATE grocery_items SET text = ? WHERE id = ?", text, id);
   }
 
   async clearCheckedGrocery(): Promise<void> {

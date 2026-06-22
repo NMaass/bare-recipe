@@ -5,7 +5,7 @@ import type { Recipe, Ingredient, Instruction } from "../shared/types";
 // the row's version on every request and treats a mismatch as a cache miss
 // (refetch + reparse). This is how "improve the parser, all old data gets
 // the fix for free" works.
-export const EXTRACTOR_VERSION = 1;
+export const EXTRACTOR_VERSION = 2;
 
 export type ExtractedRecipe = Omit<Recipe, "id"> & {
   // Parsed durations in minutes when we can, for indexing/sorting. Kept
@@ -33,6 +33,9 @@ export function extractFromHtml({ html, url }: ExtractInput): ExtractedRecipe | 
   // dead-end. Callers can decide whether to accept an OG-only recipe.
   const fromOg = extractOpenGraph(html, url);
   if (fromOg && fromOg.ingredients.length > 0) return fromOg;
+
+  const fromHtml = extractHtmlHeuristic(html, url);
+  if (fromHtml) return fromHtml;
 
   return null;
 }
@@ -429,6 +432,157 @@ function readOgTags(html: string): { title?: string; image?: string } {
     if (!out[key]) out[key] = m[1];
   }
   return out;
+}
+
+// ---------- HTML heuristic fallback ----------
+
+function extractHtmlHeuristic(html: string, url: string): ExtractedRecipe | null {
+  const title = heuristicTitle(html);
+  const image = heuristicImage(html, url);
+  const { ingredients, instructions } = heuristicBody(html);
+
+  if (ingredients.length === 0 || instructions.length === 0) return null;
+
+  return {
+    url,
+    title: title || "Untitled Recipe",
+    image,
+    prepTime: null,
+    cookTime: null,
+    servings: null,
+    ingredients,
+    instructions,
+    prepMinutes: null,
+    cookMinutes: null,
+    totalMinutes: null,
+  };
+}
+
+function heuristicTitle(html: string): string {
+  const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  if (h1) {
+    const t = stripTags(h1[1]);
+    const n = normalizeString(t);
+    if (n) return n;
+  }
+  const titleTag = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  if (titleTag) {
+    let t = normalizeString(stripTags(titleTag[1]));
+    t = t.replace(/\s+[—–-]\s+.+$/, "").trim();
+    if (t) return t;
+  }
+  return "";
+}
+
+function heuristicImage(html: string, url: string): string | null {
+  const og = readOgTags(html);
+  if (og.image) return absolutize(og.image, url);
+  const img = html.match(/<img[^>]*src=["']([^"']+)["'][^>]*>/i);
+  if (img) return absolutize(img[1], url);
+  return null;
+}
+
+function heuristicBody(
+  html: string
+): { ingredients: Ingredient[]; instructions: Instruction[] } {
+  const ingredientsMarkerIdx = findIngredientsMarker(html);
+  const ingredients: Ingredient[] = [];
+  const instructions: Instruction[] = [];
+  let sortOrder = 0;
+  let step = 1;
+
+  const ulBlocks = collectListBlocks(html, "ul");
+  const olBlocks = collectListBlocks(html, "ol");
+
+  if (ingredientsMarkerIdx !== -1) {
+    for (const block of ulBlocks) {
+      if (block.start < ingredientsMarkerIdx) continue;
+      if (olBlocks.some((o) => o.start > ingredientsMarkerIdx && o.start < block.start)) {
+        continue;
+      }
+      for (const text of listItemsText(block.inner)) {
+        const n = normalizeString(text);
+        if (n) ingredients.push({ text: n, sortOrder: sortOrder++ });
+      }
+    }
+  }
+
+  if (ingredients.length === 0 && ulBlocks.length > 0) {
+    for (const block of ulBlocks) {
+      for (const text of listItemsText(block.inner)) {
+        const n = normalizeString(text);
+        if (n) ingredients.push({ text: n, sortOrder: sortOrder++ });
+      }
+    }
+  }
+
+  for (const block of olBlocks) {
+    for (const text of listItemsText(block.inner)) {
+      const n = normalizeString(text);
+      if (n) instructions.push({ step: step++, text: n });
+    }
+  }
+
+  return { ingredients, instructions };
+}
+
+interface ListBlock {
+  start: number;
+  inner: string;
+}
+
+function collectListBlocks(html: string, tag: string): ListBlock[] {
+  const out: ListBlock[] = [];
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    out.push({ start: m.index, inner: m[1] });
+  }
+  return out;
+}
+
+function listItemsText(inner: string): string[] {
+  const out: string[] = [];
+  const liRe = /<li[^>]*>([\s\S]*?)<\/li>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = liRe.exec(inner)) !== null) {
+    const liInner = m[1];
+    const pTexts = collectParagraphTexts(liInner);
+    if (pTexts.length > 0) {
+      out.push(pTexts.join(" "));
+    } else {
+      const t = stripTags(liInner);
+      if (t.trim()) out.push(t);
+    }
+  }
+  return out;
+}
+
+function collectParagraphTexts(inner: string): string[] {
+  const out: string[] = [];
+  const pRe = /<p[^>]*>([\s\S]*?)<\/p>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = pRe.exec(inner)) !== null) {
+    const t = stripTags(m[1]);
+    if (t.trim()) out.push(t);
+  }
+  return out;
+}
+
+function findIngredientsMarker(html: string): number {
+  const re = /<(?:p|strong|b|h2|h3)[^>]*>([\s\S]*?)<\/(?:p|strong|b|h2|h3)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const text = stripTags(m[1]).trim().toLowerCase();
+    if (text === "ingredients" || text.startsWith("ingredients")) {
+      return m.index;
+    }
+  }
+  return -1;
+}
+
+function stripTags(s: string): string {
+  return s.replace(/<[^>]+>/g, "");
 }
 
 // ---------- Small helpers ----------

@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useStore } from "../store";
 import { ApiError } from "../api";
 
@@ -118,6 +118,14 @@ export default function ExtractBar() {
         {error && (
           <p role="alert" className="mt-2 text-xs text-terracotta">
             {error}
+          </p>
+        )}
+        {!statusLabel && !error && !extracting && (
+          <p className="mt-1.5 text-xs text-ink-faint">
+            or{" "}
+            <Link to="/add" className="underline hover:text-olive transition-colors">
+              type a recipe manually
+            </Link>
           </p>
         )}
       </div>

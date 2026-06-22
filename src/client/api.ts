@@ -1,6 +1,6 @@
 import type {
   Recipe,
-  GroceryItem,
+  ConsolidatedGroceryItem,
   ExtractResult,
   ExtractError,
   ExtractErrorReason,
@@ -87,12 +87,26 @@ export const api = {
     return request<void>(`/recipes/${id}`, { method: "DELETE" });
   },
 
+  createManualRecipe(data: {
+    title: string;
+    ingredients: string[];
+    instructions: string[];
+    servings?: string;
+    prepTime?: string;
+    cookTime?: string;
+  }) {
+    return request<Recipe>("/recipes/manual", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
   getGroceryList() {
-    return request<GroceryItem[]>("/grocery");
+    return request<ConsolidatedGroceryItem[]>("/grocery");
   },
 
   addToGrocery(recipeId: string, recipeTitle: string, ingredientTexts: string[]) {
-    return request<GroceryItem[]>("/grocery", {
+    return request<ConsolidatedGroceryItem[]>("/grocery", {
       method: "POST",
       body: JSON.stringify({
         items: ingredientTexts.map((text) => ({ text, recipeId, recipeTitle })),
@@ -104,8 +118,21 @@ export const api = {
     return request<void>(`/grocery/${id}`, { method: "PATCH" });
   },
 
+  updateGroceryItemText(id: number, text: string) {
+    return request<void>(`/grocery/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text }),
+    });
+  },
+
   deleteGroceryItem(id: number) {
     return request<void>(`/grocery/${id}`, { method: "DELETE" });
+  },
+
+  removeRecipeFromGrocery(recipeId: string) {
+    return request<void>(`/grocery/recipe/${encodeURIComponent(recipeId)}`, {
+      method: "DELETE",
+    });
   },
 
   clearCheckedGrocery() {

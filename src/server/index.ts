@@ -1,10 +1,12 @@
 import { UserStore } from "./user-store";
-import { extractFromHtml, EXTRACTOR_VERSION } from "./extractor";
+import { extractFromHtml, EXTRACTOR_VERSION, type ExtractedRecipe } from "./extractor";
 import { fetchPage } from "./fetch-page";
 import { canonicalizeUrl, isSafeHost, urlHash } from "./url";
 import { getRecipe, getRecipes, putRecipe, searchRecipes } from "./catalog";
 import type {
   Recipe,
+  Ingredient,
+  Instruction,
   ExtractResult,
   ExtractError,
   ExtractErrorReason,
@@ -167,6 +169,52 @@ export default {
         return json(hit.recipe, 201);
       }
 
+      // ---------- Manual recipe entry ----------
+      // POST /api/recipes/manual { title, ingredients[], instructions[], ... }
+      if (url.pathname === "/api/recipes/manual" && request.method === "POST") {
+        const body = (await request.json()) as {
+          title?: string;
+          ingredients?: string[];
+          instructions?: string[];
+          servings?: string;
+          prepTime?: string;
+          cookTime?: string;
+        };
+
+        const id = crypto.randomUUID();
+        const ingredients: Ingredient[] = (body.ingredients || [])
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .map((text, i) => ({ text, sortOrder: i }));
+        const instructions: Instruction[] = (body.instructions || [])
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .map((text, i) => ({ step: i + 1, text }));
+
+        if (!body.title?.trim() || ingredients.length === 0) {
+          return extractError("invalid_url", "Title and at least one ingredient are required");
+        }
+
+        const parsed: ExtractedRecipe = {
+          url: "",
+          title: body.title.trim(),
+          image: null,
+          prepTime: body.prepTime?.trim() || null,
+          cookTime: body.cookTime?.trim() || null,
+          servings: body.servings?.trim() || null,
+          ingredients,
+          instructions,
+          prepMinutes: null,
+          cookMinutes: null,
+          totalMinutes: null,
+        };
+
+        const recipe = await putRecipe(env.CATALOG, id, "manual", parsed);
+        await store.addBookmark(id);
+
+        return json(recipe, 201);
+      }
+
       // DELETE /api/recipes/:id  (id is the url_hash)
       const recipeDeleteMatch = url.pathname.match(/^\/api\/recipes\/(.+)$/);
       if (recipeDeleteMatch && request.method === "DELETE") {
@@ -176,7 +224,7 @@ export default {
 
       // ---------- Grocery ----------
       if (url.pathname === "/api/grocery" && request.method === "GET") {
-        const items = await store.getGroceryList();
+        const items = await store.getConsolidatedGroceryList();
         return json(items);
       }
 
@@ -184,7 +232,8 @@ export default {
         const body = (await request.json()) as {
           items: { text: string; recipeId: string; recipeTitle?: string }[];
         };
-        const items = await store.addToGrocery(body.items);
+        await store.addToGrocery(body.items);
+        const items = await store.getConsolidatedGroceryList();
         return json(items, 201);
       }
 
@@ -199,13 +248,28 @@ export default {
 
       const groceryPatchMatch = url.pathname.match(/^\/api\/grocery\/(\d+)$/);
       if (groceryPatchMatch && request.method === "PATCH") {
-        await store.toggleGroceryItem(Number(groceryPatchMatch[1]));
+        const body = (await request.json()) as { text?: string };
+        if (body.text !== undefined) {
+          await store.updateGroceryItemText(Number(groceryPatchMatch[1]), body.text);
+        } else {
+          await store.toggleGroceryItem(Number(groceryPatchMatch[1]));
+        }
         return json({ ok: true });
       }
 
       const groceryDeleteMatch = url.pathname.match(/^\/api\/grocery\/(\d+)$/);
       if (groceryDeleteMatch && request.method === "DELETE") {
         await store.deleteGroceryItem(Number(groceryDeleteMatch[1]));
+        return json({ ok: true });
+      }
+
+      const groceryRecipeMatch = url.pathname.match(
+        /^\/api\/grocery\/recipe\/(.+)$/
+      );
+      if (groceryRecipeMatch && request.method === "DELETE") {
+        await store.removeRecipeFromGrocery(
+          decodeURIComponent(groceryRecipeMatch[1])
+        );
         return json({ ok: true });
       }
 

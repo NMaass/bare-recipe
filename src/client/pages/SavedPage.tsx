@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { formatDuration, usePageTitle } from "../utils";
-import NavTabs from "../components/NavTabs";
 
 export default function SavedPage() {
   const { savedRecipes, loadSavedRecipes, deleteRecipe, setCurrentRecipe } = useStore();
@@ -49,7 +48,6 @@ export default function SavedPage() {
   if (savedRecipes.length === 0 && !searching) {
     return (
       <div className="max-w-xl mx-auto flex flex-col items-start justify-center min-h-[60vh] px-6 animate-page">
-        <NavTabs />
         <h1 className="font-serif text-3xl text-ink mt-2 mb-2">Nothing yet</h1>
         <p className="text-ink-light text-base">
           Paste a recipe link above to save your first.
@@ -60,7 +58,6 @@ export default function SavedPage() {
 
   return (
     <div className="max-w-xl mx-auto px-5 pt-6 pb-6 animate-page">
-      <NavTabs />
       <h1 className="font-serif text-2xl text-ink mb-4">
         {searching
           ? `${savedRecipes.length} result${savedRecipes.length !== 1 ? "s" : ""}`

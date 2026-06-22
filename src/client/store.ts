@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Recipe, GroceryItem } from "../shared/types";
+import type { Recipe, ConsolidatedGroceryItem } from "../shared/types";
 import { api } from "./api";
 
 // Visible state during extract so the UI can show progressive feedback
@@ -9,20 +9,31 @@ export type ExtractPhase = "idle" | "fetching" | "saved" | "cached";
 interface Store {
   currentRecipe: Recipe | null;
   savedRecipes: Recipe[];
-  groceryItems: GroceryItem[];
+  groceryItems: ConsolidatedGroceryItem[];
   extracting: boolean;
   extractPhase: ExtractPhase;
   loading: boolean;
   prefetched: boolean;
 
   extractAndSave: (url: string) => Promise<Recipe>;
+  createManualRecipe: (data: {
+    title: string;
+    ingredients: string[];
+    instructions: string[];
+    servings?: string;
+    prepTime?: string;
+    cookTime?: string;
+  }) => Promise<Recipe>;
   setCurrentRecipe: (recipe: Recipe | null) => void;
   loadSavedRecipes: (query?: string) => Promise<void>;
   deleteRecipe: (id: string) => Promise<void>;
   loadGroceryList: () => Promise<void>;
   addToGrocery: (recipeId: string, recipeTitle: string, items: string[]) => Promise<void>;
-  toggleGroceryItem: (id: number) => Promise<void>;
-  removeGroceryItem: (id: number) => Promise<void>;
+  toggleGroceryGroup: (key: string) => Promise<void>;
+  toggleGroceryItem: (itemId: number) => Promise<void>;
+  removeGroceryItem: (itemId: number) => Promise<void>;
+  removeRecipeFromGrocery: (recipeId: string) => Promise<void>;
+  updateGroceryItemText: (itemId: number, text: string) => Promise<void>;
   clearCheckedGrocery: () => Promise<void>;
   clearAllGrocery: () => Promise<void>;
   prefetch: () => Promise<void>;
@@ -41,21 +52,37 @@ export const useStore = create<Store>((set, get) => ({
     set({ extracting: true, extractPhase: "fetching" });
     try {
       const result = await api.extractRecipe(url);
-      // /api/extract now auto-bookmarks server-side. The extra POST /api/recipes
-      // is a back-compat idempotent no-op, so we just refresh the saved list.
       set({
         currentRecipe: result.recipe,
         extractPhase: result.cacheHit ? "cached" : "saved",
       });
       await get().loadSavedRecipes();
-      // Briefly hold the success phase so the UI can flash a confirmation
-      // before resetting. The phase auto-clears so the caller doesn't have to.
       setTimeout(() => {
         if (get().extractPhase === "saved" || get().extractPhase === "cached") {
           set({ extractPhase: "idle" });
         }
       }, 1500);
       return result.recipe;
+    } catch (err) {
+      set({ extractPhase: "idle" });
+      throw err;
+    } finally {
+      set({ extracting: false });
+    }
+  },
+
+  createManualRecipe: async (data) => {
+    set({ extracting: true, extractPhase: "fetching" });
+    try {
+      const recipe = await api.createManualRecipe(data);
+      set({ currentRecipe: recipe, extractPhase: "saved" });
+      await get().loadSavedRecipes();
+      setTimeout(() => {
+        if (get().extractPhase === "saved" || get().extractPhase === "cached") {
+          set({ extractPhase: "idle" });
+        }
+      }, 1500);
+      return recipe;
     } catch (err) {
       set({ extractPhase: "idle" });
       throw err;
@@ -104,25 +131,119 @@ export const useStore = create<Store>((set, get) => ({
     await get().loadGroceryList();
   },
 
-  toggleGroceryItem: async (id) => {
+  toggleGroceryGroup: async (key) => {
+    const group = get().groceryItems.find((g) => g.key === key);
+    if (!group) return;
+    const targetChecked = !group.checked;
     set((state) => ({
-      groceryItems: state.groceryItems.map((item) =>
-        item.id === id ? { ...item, checked: !item.checked } : item
+      groceryItems: state.groceryItems.map((g) =>
+        g.key === key
+          ? {
+              ...g,
+              checked: targetChecked,
+              sources: g.sources.map((s) => ({ ...s, checked: targetChecked })),
+            }
+          : g
       ),
     }));
     try {
-      await api.toggleGroceryItem(id);
+      const toToggle = group.sources.filter((s) => s.checked !== targetChecked);
+      await Promise.all(
+        toToggle.map((s) => api.toggleGroceryItem(s.itemId))
+      );
     } catch {
       await get().loadGroceryList();
     }
   },
 
-  removeGroceryItem: async (id) => {
+  toggleGroceryItem: async (itemId) => {
     set((state) => ({
-      groceryItems: state.groceryItems.filter((item) => item.id !== id),
+      groceryItems: state.groceryItems.map((g) => {
+        const sourceIdx = g.sources.findIndex((s) => s.itemId === itemId);
+        if (sourceIdx === -1) return g;
+        const newSources = g.sources.map((s, i) =>
+          i === sourceIdx ? { ...s, checked: !s.checked } : s
+        );
+        return {
+          ...g,
+          sources: newSources,
+          checked: newSources.every((s) => s.checked),
+        };
+      }),
     }));
     try {
-      await api.deleteGroceryItem(id);
+      await api.toggleGroceryItem(itemId);
+    } catch {
+      await get().loadGroceryList();
+    }
+  },
+
+  removeGroceryItem: async (itemId) => {
+    set((state) => ({
+      groceryItems: state.groceryItems
+        .map((g) => {
+          const newSources = g.sources.filter((s) => s.itemId !== itemId);
+          if (newSources.length === 0) return null;
+          const totalQuantity = newSources.reduce(
+            (sum, s) => sum + (s.quantity ?? 0),
+            0
+          );
+          const hasAnyQuantity = newSources.some((s) => s.quantity !== null);
+          return {
+            ...g,
+            sources: newSources,
+            quantity: hasAnyQuantity ? totalQuantity : null,
+            checked: newSources.every((s) => s.checked),
+          };
+        })
+        .filter((g): g is ConsolidatedGroceryItem => g !== null),
+    }));
+    try {
+      await api.deleteGroceryItem(itemId);
+    } catch {
+      await get().loadGroceryList();
+    }
+  },
+
+  removeRecipeFromGrocery: async (recipeId) => {
+    set((state) => ({
+      groceryItems: state.groceryItems
+        .map((g) => {
+          const newSources = g.sources.filter((s) => s.recipeId !== recipeId);
+          if (newSources.length === 0) return null;
+          const totalQuantity = newSources.reduce(
+            (sum, s) => sum + (s.quantity ?? 0),
+            0
+          );
+          const hasAnyQuantity = newSources.some((s) => s.quantity !== null);
+          return {
+            ...g,
+            sources: newSources,
+            quantity: hasAnyQuantity ? totalQuantity : null,
+            checked: newSources.every((s) => s.checked),
+          };
+        })
+        .filter((g): g is ConsolidatedGroceryItem => g !== null),
+    }));
+    try {
+      await api.removeRecipeFromGrocery(recipeId);
+    } catch {
+      await get().loadGroceryList();
+    }
+  },
+
+  updateGroceryItemText: async (itemId, text) => {
+    set((state) => ({
+      groceryItems: state.groceryItems.map((g) => ({
+        ...g,
+        sources: g.sources.map((s) =>
+          s.itemId === itemId ? { ...s, originalText: text } : s
+        ),
+      })),
+    }));
+    try {
+      await api.updateGroceryItemText(itemId, text);
+      await get().loadGroceryList();
     } catch {
       await get().loadGroceryList();
     }
