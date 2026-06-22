@@ -5,7 +5,7 @@ import type { Recipe, Ingredient, Instruction } from "../shared/types";
 // the row's version on every request and treats a mismatch as a cache miss
 // (refetch + reparse). This is how "improve the parser, all old data gets
 // the fix for free" works.
-export const EXTRACTOR_VERSION = 2;
+export const EXTRACTOR_VERSION = 3;
 
 export type ExtractedRecipe = Omit<Recipe, "id"> & {
   // Parsed durations in minutes when we can, for indexing/sorting. Kept
@@ -150,11 +150,13 @@ function parseIngredients(raw: unknown): Ingredient[] {
   const out: Ingredient[] = [];
   if (Array.isArray(raw)) {
     raw.forEach((item, i) => {
-      const text = normalizeString(ingredientText(item));
+      let text = normalizeString(ingredientText(item));
+      text = text.replace(/\s*\(\(.*?\)\)\s*/g, " ").trim();
       if (text) out.push({ text, sortOrder: i });
     });
   } else if (typeof raw === "string") {
     normalizeString(raw)
+      .replace(/\s*\(\(.*?\)\)\s*/g, " ")
       .split(/\r?\n|;|·/)
       .map((s) => s.trim())
       .filter(Boolean)

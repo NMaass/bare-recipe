@@ -1,6 +1,7 @@
 import type {
   Recipe,
   ConsolidatedGroceryItem,
+  GroceryRecipe,
   ExtractResult,
   ExtractError,
   ExtractErrorReason,
@@ -61,6 +62,11 @@ async function request<T>(
   return res.json();
 }
 
+export interface GroceryListResponse {
+  items: ConsolidatedGroceryItem[];
+  recipes: GroceryRecipe[];
+}
+
 export const api = {
   extractRecipe(url: string) {
     return request<ExtractResult>("/extract", {
@@ -74,8 +80,6 @@ export const api = {
     return request<Recipe[]>(`/recipes${qs}`);
   },
 
-  // Kept for back-compat with the old "extract then save" flow. The new
-  // /api/extract already bookmarks; this is now an idempotent no-op-ish.
   saveRecipe(recipe: Recipe) {
     return request<Recipe>("/recipes", {
       method: "POST",
@@ -102,11 +106,11 @@ export const api = {
   },
 
   getGroceryList() {
-    return request<ConsolidatedGroceryItem[]>("/grocery");
+    return request<GroceryListResponse>("/grocery");
   },
 
   addToGrocery(recipeId: string, recipeTitle: string, ingredientTexts: string[]) {
-    return request<ConsolidatedGroceryItem[]>("/grocery", {
+    return request<GroceryListResponse>("/grocery", {
       method: "POST",
       body: JSON.stringify({
         items: ingredientTexts.map((text) => ({ text, recipeId, recipeTitle })),
@@ -132,6 +136,13 @@ export const api = {
   removeRecipeFromGrocery(recipeId: string) {
     return request<void>(`/grocery/recipe/${encodeURIComponent(recipeId)}`, {
       method: "DELETE",
+    });
+  },
+
+  updateRecipeMultiplier(recipeId: string, multiplier: number) {
+    return request<void>(`/grocery/recipe/${encodeURIComponent(recipeId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ multiplier }),
     });
   },
 

@@ -144,7 +144,7 @@ export function parseIngredient(text: string): ParsedIngredient {
     }
   }
 
-  name = name.replace(/\s*\([^)]*\)/g, "").trim();
+  name = name.replace(/\s*\(\(.*?\)\)\s*/g, " ").replace(/\s*\([^)]*\)/g, "").trim();
 
   const key = unit ? `${unit}:${name.toLowerCase()}` : name.toLowerCase();
 

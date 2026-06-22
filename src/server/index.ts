@@ -224,8 +224,11 @@ export default {
 
       // ---------- Grocery ----------
       if (url.pathname === "/api/grocery" && request.method === "GET") {
-        const items = await store.getConsolidatedGroceryList();
-        return json(items);
+        const [items, recipes] = await Promise.all([
+          store.getConsolidatedGroceryList(),
+          store.getGroceryRecipes(),
+        ]);
+        return json({ items, recipes });
       }
 
       if (url.pathname === "/api/grocery" && request.method === "POST") {
@@ -233,8 +236,11 @@ export default {
           items: { text: string; recipeId: string; recipeTitle?: string }[];
         };
         await store.addToGrocery(body.items);
-        const items = await store.getConsolidatedGroceryList();
-        return json(items, 201);
+        const [consolidated, recipes] = await Promise.all([
+          store.getConsolidatedGroceryList(),
+          store.getGroceryRecipes(),
+        ]);
+        return json({ items: consolidated, recipes }, 201);
       }
 
       if (url.pathname === "/api/grocery" && request.method === "DELETE") {
@@ -270,6 +276,17 @@ export default {
         await store.removeRecipeFromGrocery(
           decodeURIComponent(groceryRecipeMatch[1])
         );
+        return json({ ok: true });
+      }
+
+      if (groceryRecipeMatch && request.method === "PATCH") {
+        const body = (await request.json()) as { multiplier?: number };
+        if (typeof body.multiplier === "number" && body.multiplier > 0) {
+          await store.updateRecipeMultiplier(
+            decodeURIComponent(groceryRecipeMatch[1]),
+            body.multiplier
+          );
+        }
         return json({ ok: true });
       }
 

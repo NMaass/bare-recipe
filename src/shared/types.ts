@@ -32,6 +32,12 @@ export interface GroceryItem {
   addedAt: number;
 }
 
+export interface GroceryRecipe {
+  recipeId: string;
+  recipeTitle: string;
+  multiplier: number;
+}
+
 export interface GroceryItemSource {
   itemId: number;
   recipeId: string | null;
@@ -41,6 +47,7 @@ export interface GroceryItemSource {
   unit: string;
   name: string;
   checked: boolean;
+  multiplier: number;
 }
 
 export interface ConsolidatedGroceryItem {

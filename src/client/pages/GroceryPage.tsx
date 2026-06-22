@@ -1,27 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useStore } from "../store";
 import { formatIngredientText, usePageTitle } from "../utils";
 import { formatQuantity, formatUnit } from "../../shared/ingredient-parser";
 
 export default function GroceryPage() {
+  const navigate = useNavigate();
   const {
     groceryItems,
+    groceryRecipes,
     loadGroceryList,
     toggleGroceryGroup,
     toggleGroceryItem,
     removeGroceryItem,
     removeRecipeFromGrocery,
     updateGroceryItemText,
+    updateRecipeMultiplier,
     clearCheckedGrocery,
     clearAllGrocery,
   } = useStore();
   const [confirmingClearAll, setConfirmingClearAll] = useState(false);
-  const [confirmingRecipe, setConfirmingRecipe] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
+  const [filterRecipeId, setFilterRecipeId] = useState<string | null>(null);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recipeConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   usePageTitle("Grocery");
 
@@ -31,24 +33,31 @@ export default function GroceryPage() {
 
   useEffect(() => () => {
     if (confirmTimer.current) clearTimeout(confirmTimer.current);
-    if (recipeConfirmTimer.current) clearTimeout(recipeConfirmTimer.current);
   }, []);
 
-  const uncheckedCount = groceryItems.filter((i) => !i.checked).length;
-  const totalCount = groceryItems.length;
-  const hasChecked = groceryItems.some((item) => item.checked);
+  const visibleItems = filterRecipeId
+    ? groceryItems.filter((item) =>
+        item.sources.some((s) => s.recipeId === filterRecipeId)
+      )
+    : groceryItems;
 
-  const recipes = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const item of groceryItems) {
-      for (const source of item.sources) {
-        if (source.recipeId && source.recipeTitle) {
-          map.set(source.recipeId, source.recipeTitle);
-        }
-      }
+  const uncheckedCount = visibleItems.filter((i) => !i.checked).length;
+  const totalCount = visibleItems.length;
+  const hasChecked = visibleItems.some((item) => item.checked);
+
+  const handleChipClick = (recipeId: string) => {
+    if (filterRecipeId === recipeId) {
+      navigate(`/recipe/${recipeId}`);
+    } else {
+      setFilterRecipeId(recipeId);
     }
-    return Array.from(map.entries()).map(([id, title]) => ({ id, title }));
-  }, [groceryItems]);
+  };
+
+  const handleChipDelete = (e: React.MouseEvent, recipeId: string) => {
+    e.stopPropagation();
+    removeRecipeFromGrocery(recipeId);
+    if (filterRecipeId === recipeId) setFilterRecipeId(null);
+  };
 
   if (groceryItems.length === 0) {
     return (
@@ -79,24 +88,11 @@ export default function GroceryPage() {
     if (confirmTimer.current) clearTimeout(confirmTimer.current);
     await clearAllGrocery();
     setConfirmingClearAll(false);
+    setFilterRecipeId(null);
   };
 
   const handleClearChecked = async () => {
     await clearCheckedGrocery();
-  };
-
-  const handleRemoveRecipe = async (recipeId: string) => {
-    if (confirmingRecipe !== recipeId) {
-      setConfirmingRecipe(recipeId);
-      if (recipeConfirmTimer.current) clearTimeout(recipeConfirmTimer.current);
-      recipeConfirmTimer.current = setTimeout(() => {
-        setConfirmingRecipe((cur) => (cur === recipeId ? null : cur));
-      }, 3000);
-      return;
-    }
-    if (recipeConfirmTimer.current) clearTimeout(recipeConfirmTimer.current);
-    setConfirmingRecipe(null);
-    await removeRecipeFromGrocery(recipeId);
   };
 
   const startEdit = (itemId: number, currentText: string) => {
@@ -117,13 +113,24 @@ export default function GroceryPage() {
     setEditText("");
   };
 
+  const adjustMultiplier = async (recipeId: string, current: number, delta: number) => {
+    const next = Math.round((current + delta) * 2) / 2;
+    if (next > 0) {
+      await updateRecipeMultiplier(recipeId, next);
+    }
+  };
+
+  const filteredRecipe = groceryRecipes.find((r) => r.recipeId === filterRecipeId);
+
   return (
     <div className="max-w-xl mx-auto px-5 pt-6 pb-6 animate-page">
       <div className="flex items-baseline justify-between mb-5">
         <h1 className="font-serif text-2xl text-ink">
-          {uncheckedCount === 0
-            ? `All ${totalCount} checked`
-            : `${uncheckedCount} to buy`}
+          {filterRecipeId
+            ? filteredRecipe?.recipeTitle || "Filtered"
+            : uncheckedCount === 0
+              ? `All ${totalCount} checked`
+              : `${uncheckedCount} to buy`}
         </h1>
 
         <div className="flex items-center gap-2">
@@ -149,29 +156,101 @@ export default function GroceryPage() {
         </div>
       </div>
 
-      {recipes.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-5">
-          {recipes.map((recipe) => (
-            <button
-              key={recipe.id}
-              onClick={() => handleRemoveRecipe(recipe.id)}
-              className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
-                confirmingRecipe === recipe.id
-                  ? "bg-terracotta/15 text-terracotta"
-                  : "bg-cream-dark text-ink-muted hover:bg-terracotta/10 hover:text-terracotta"
-              }`}
-            >
-              <span className="max-w-[180px] truncate">{recipe.title}</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3 shrink-0" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />
-              </svg>
-            </button>
-          ))}
+      {groceryRecipes.length > 0 && (
+        <div className="mb-4">
+          <div className="flex flex-wrap gap-2 mb-2">
+            {groceryRecipes.map((recipe) => (
+              <button
+                key={recipe.recipeId}
+                onClick={() => handleChipClick(recipe.recipeId)}
+                className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition-colors ${
+                  filterRecipeId === recipe.recipeId
+                    ? "bg-olive text-cream"
+                    : "bg-cream-dark text-ink-muted hover:bg-cream-dark/70"
+                }`}
+              >
+                {recipe.multiplier > 1 && (
+                  <span className="font-semibold tabular-nums">
+                    {formatQuantity(recipe.multiplier)}×
+                  </span>
+                )}
+                <span className="max-w-[160px] truncate">{recipe.recipeTitle}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => handleChipDelete(e, recipe.recipeId)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleChipDelete(e as unknown as React.MouseEvent, recipe.recipeId);
+                    }
+                  }}
+                  className={`shrink-0 ml-0.5 -mr-1 w-4 h-4 flex items-center justify-center rounded-full transition-colors ${
+                    filterRecipeId === recipe.recipeId
+                      ? "hover:bg-cream/20"
+                      : "hover:bg-terracotta/15 hover:text-terracotta"
+                  }`}
+                  aria-label={`Remove ${recipe.recipeTitle} from grocery list`}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-3 h-3" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {filterRecipeId && filteredRecipe && (
+            <div className="flex items-center gap-3 px-3 py-2 bg-cream-dark rounded-lg animate-page">
+              <button
+                onClick={() => setFilterRecipeId(null)}
+                className="text-xs font-medium text-ink-muted hover:text-ink transition-colors flex items-center gap-1"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />
+                </svg>
+                All
+              </button>
+              <span className="text-xs text-ink-faint">·</span>
+              <span className="text-xs text-ink-muted">Multiplier</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => adjustMultiplier(filteredRecipe.recipeId, filteredRecipe.multiplier, -0.5)}
+                  disabled={filteredRecipe.multiplier <= 0.5}
+                  className="w-7 h-7 flex items-center justify-center rounded-md bg-cream border border-warm-border text-ink-muted hover:text-ink hover:border-ink-faint disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Decrease multiplier"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5" aria-hidden="true">
+                    <path strokeLinecap="round" d="M5 12h14" />
+                  </svg>
+                </button>
+                <span className="text-sm font-semibold tabular-nums text-ink min-w-[2.5rem] text-center">
+                  {formatQuantity(filteredRecipe.multiplier)}×
+                </span>
+                <button
+                  onClick={() => adjustMultiplier(filteredRecipe.recipeId, filteredRecipe.multiplier, 0.5)}
+                  className="w-7 h-7 flex items-center justify-center rounded-md bg-cream border border-warm-border text-ink-muted hover:text-ink hover:border-ink-faint transition-colors"
+                  aria-label="Increase multiplier"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5" aria-hidden="true">
+                    <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+              </div>
+              <span className="flex-1" />
+              <Link
+                to={`/recipe/${filteredRecipe.recipeId}`}
+                className="text-xs font-medium text-olive hover:text-olive-light transition-colors"
+              >
+                View recipe
+              </Link>
+            </div>
+          )}
         </div>
       )}
 
       <div className="space-y-2 stagger">
-        {groceryItems.map((item) => {
+        {visibleItems.map((item) => {
           const hasMultipleSources = item.sources.length > 1;
           return (
             <details
@@ -214,7 +293,7 @@ export default function GroceryPage() {
                 {hasMultipleSources && (
                   <span className="flex items-center gap-2 pr-4">
                     <span className="text-xs text-ink-muted">
-                      {item.sources.length} recipes
+                      {item.sources.length} {item.sources.length === 1 ? "recipe" : "recipes"}
                     </span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4 text-ink-soft transition-transform group-open:rotate-180" aria-hidden="true">
                       <polyline points="6 9 12 15 18 9" />
@@ -275,8 +354,13 @@ export default function GroceryPage() {
                               ? `${formatQuantity(source.quantity)} ${formatUnit(source.unit, source.quantity)}`
                               : formatIngredientText(source.originalText)}
                           </span>
+                          {source.multiplier > 1 && (
+                            <span className="text-xs text-olive font-medium shrink-0">
+                              {formatQuantity(source.multiplier)}×
+                            </span>
+                          )}
                           {source.recipeTitle && (
-                            <span className="text-xs text-ink-faint shrink-0 max-w-[120px] truncate">
+                            <span className="text-xs text-ink-faint shrink-0 max-w-[100px] truncate">
                               {source.recipeTitle}
                             </span>
                           )}
