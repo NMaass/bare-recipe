@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
-import { usePageTitle } from "../utils";
+import { formatIngredientText, usePageTitle } from "../utils";
 import NavTabs from "../components/NavTabs";
 
 export default function GroceryPage() {
@@ -27,6 +27,7 @@ export default function GroceryPage() {
   }, []);
 
   const uncheckedCount = groceryItems.filter((i) => !i.checked).length;
+  const totalCount = groceryItems.length;
   const hasChecked = groceryItems.some((item) => item.checked);
 
   const groups = groceryItems.reduce<Record<string, typeof groceryItems>>((acc, item) => {
@@ -78,7 +79,9 @@ export default function GroceryPage() {
         <div>
           <NavTabs />
           <h1 className="font-serif text-2xl text-ink">
-            {uncheckedCount} item{uncheckedCount !== 1 ? "s" : ""}
+            {uncheckedCount === 0
+              ? `All ${totalCount} checked`
+              : `${uncheckedCount} to buy`}
           </h1>
         </div>
 
@@ -149,12 +152,12 @@ export default function GroceryPage() {
                           item.checked ? "text-ink-muted line-through" : "text-ink"
                         }`}
                       >
-                        {item.text}
+                        {formatIngredientText(item.text)}
                       </span>
                     </button>
                     <button
                       onClick={() => removeGroceryItem(item.id)}
-                      aria-label={`Remove ${item.text}`}
+                      aria-label={`Remove ${formatIngredientText(item.text)}`}
                       className="min-w-[44px] min-h-[44px] flex items-center justify-center text-ink-faint hover:text-terracotta transition-colors"
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4" aria-hidden="true">

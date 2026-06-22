@@ -1,4 +1,5 @@
 import type { Ingredient } from "../../shared/types";
+import { formatIngredientText } from "../utils";
 
 interface Props {
   ingredients: Ingredient[];
@@ -13,7 +14,7 @@ export default function IngredientList({ ingredients }: Props) {
           className="py-2.5 text-[15px] text-ink leading-relaxed animate-slide-in"
           style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}
         >
-          {ing.text}
+          {formatIngredientText(ing.text)}
         </li>
       ))}
     </ul>
