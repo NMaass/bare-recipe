@@ -38,16 +38,18 @@ function extractError(reason: ExtractErrorReason, message: string, status = 400)
   return json(body, status);
 }
 
-// Per-device data isolation without login:
-// The client mints a random UUID on first load (stored in localStorage) and
-// sends it as `X-Device-ID`. Each value maps to its own Durable Object, which
-// owns its own SQLite — so users never see each other's bookmarks or grocery
-// items. Anyone who clears storage or switches devices effectively becomes a
-// new user. If we ever need real auth, wrap the worker in Cloudflare Access
-// and key off the verified email instead of the header.
-function getUserStore(request: Request, env: Env): DurableObjectStub<UserStore> {
-  const deviceId = request.headers.get("X-Device-ID") || "anonymous";
-  const id = env.USER_STORE.idFromName(deviceId);
+// Single shared store — "one big database."
+// Every request maps to the *same* Durable Object, so bookmarks and the
+// grocery list are shared across all devices: add a recipe on your laptop and
+// it shows up on your phone. There's no per-device isolation and no auth, so
+// anyone with the URL sees and edits the same list. The client still sends an
+// `X-Device-ID` header; we intentionally ignore it. If we ever want per-user
+// data again, wrap the worker in Cloudflare Access and key off the verified
+// email here instead of the constant.
+const SHARED_STORE_NAME = "global";
+
+function getUserStore(_request: Request, env: Env): DurableObjectStub<UserStore> {
+  const id = env.USER_STORE.idFromName(SHARED_STORE_NAME);
   return env.USER_STORE.get(id);
 }
 
