@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
 import { formatDuration, safeImageUrl, usePageTitle } from "../utils";
+import { isShoppableIngredient } from "../../shared/ingredient-parser";
 
 export default function SavedPage() {
   const { savedRecipes, loadSavedRecipes, deleteRecipe, setCurrentRecipe, addToGrocery } = useStore();
@@ -146,7 +147,7 @@ export default function SavedPage() {
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button
-                  onClick={(e) => handleAddToGrocery(recipe.id, recipe.title, recipe.ingredients.map((i) => i.text), e)}
+                  onClick={(e) => handleAddToGrocery(recipe.id, recipe.title, recipe.ingredients.filter((i) => isShoppableIngredient(i.kind)).map((i) => i.text), e)}
                   aria-label={`Add ${recipe.title} to grocery list`}
                   className={`w-9 h-9 flex items-center justify-center rounded-md transition-colors ${
                     isAdded

@@ -1,4 +1,8 @@
 import type { Recipe, Ingredient, Instruction } from "../shared/types";
+import {
+  classifyIngredientLine,
+  splitMergedIngredientLine,
+} from "../shared/ingredient-parser";
 import { safeAbsoluteUrl } from "./url";
 
 // Bump when the parser changes in a way that should re-extract previously
@@ -6,7 +10,7 @@ import { safeAbsoluteUrl } from "./url";
 // the row's version on every request and treats a mismatch as a cache miss
 // (refetch + reparse). This is how "improve the parser, all old data gets
 // the fix for free" works.
-export const EXTRACTOR_VERSION = 3;
+export const EXTRACTOR_VERSION = 4;
 
 export type ExtractedRecipe = Omit<Recipe, "id"> & {
   // Parsed durations in minutes when we can, for indexing/sorting. Kept
@@ -148,20 +152,28 @@ function mapToRecipe(
 // ---------- Ingredient parsing ----------
 
 function parseIngredients(raw: unknown): Ingredient[] {
-  const out: Ingredient[] = [];
+  // Collect raw line texts first, then split glued lines and route each. JSON-LD
+  // located the list for us; this pass just cleans what's inside it.
+  const lines: string[] = [];
   if (Array.isArray(raw)) {
-    raw.forEach((item, i) => {
-      let text = normalizeString(ingredientText(item));
-      text = text.replace(/\s*\(\(.*?\)\)\s*/g, " ").trim();
-      if (text) out.push({ text, sortOrder: i });
-    });
+    for (const item of raw) {
+      const text = normalizeString(ingredientText(item)).replace(/\s*\(\(.*?\)\)\s*/g, " ").trim();
+      if (text) lines.push(text);
+    }
   } else if (typeof raw === "string") {
     normalizeString(raw)
       .replace(/\s*\(\(.*?\)\)\s*/g, " ")
       .split(/\r?\n|;|·/)
       .map((s) => s.trim())
       .filter(Boolean)
-      .forEach((text, i) => out.push({ text, sortOrder: i }));
+      .forEach((text) => lines.push(text));
+  }
+
+  const out: Ingredient[] = [];
+  for (const line of lines) {
+    for (const piece of splitMergedIngredientLine(line)) {
+      out.push({ text: piece, sortOrder: out.length, kind: classifyIngredientLine(piece) });
+    }
   }
   return out;
 }

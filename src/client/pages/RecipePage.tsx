@@ -4,7 +4,7 @@ import { useStore } from "../store";
 import IngredientList from "../components/IngredientList";
 import InstructionList from "../components/InstructionList";
 import { formatDuration, safeHostname, safeImageUrl, safeOutboundUrl, usePageTitle } from "../utils";
-import { parseServings, formatQuantity } from "../../shared/ingredient-parser";
+import { parseServings, formatQuantity, isShoppableIngredient } from "../../shared/ingredient-parser";
 import type { Recipe } from "../../shared/types";
 
 export default function RecipePage() {
@@ -53,7 +53,9 @@ export default function RecipePage() {
   }
 
   const handleAddToGrocery = async () => {
-    const items = recipe.ingredients.map((i) => i.text);
+    const items = recipe.ingredients
+      .filter((i) => isShoppableIngredient(i.kind))
+      .map((i) => i.text);
     await addToGrocery(recipe.id, recipe.title, items);
     setAddedToGrocery(true);
     if (addedTimer.current) clearTimeout(addedTimer.current);

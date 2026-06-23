@@ -15,7 +15,13 @@ export interface Ingredient {
   id?: number;
   text: string;
   sortOrder: number;
+  // How the extractor routed this line. Absent on manually-entered recipes and
+  // pre-routing cached rows — treat absent as "ingredient". See
+  // classifyIngredientLine in shared/ingredient-parser.
+  kind?: IngredientKind;
 }
+
+export type IngredientKind = "ingredient" | "equipment" | "note";
 
 export interface Instruction {
   id?: number;

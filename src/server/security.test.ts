@@ -76,6 +76,56 @@ describe("URL safety", () => {
     expect(isSafeHost(finalUrl?.host || "")).toBe(false);
   });
 
+  test("routes equipment/notes out of a polluted recipeIngredient list", () => {
+    // Mirrors a real site (The Berger Feed) that stuffs an affiliate equipment
+    // list and prose tips into recipeIngredient, and glues two ingredients onto
+    // one line. JSON-LD locates the list; the extractor cleans what's inside it.
+    const recipe = extractFromHtml({
+      url: "https://example.com/strawberry-rhubarb-cookies",
+      html: `
+        <script type="application/ld+json">
+          {
+            "@context": "https://schema.org",
+            "@type": "Recipe",
+            "name": "Strawberry Rhubarb Cookies",
+            "recipeIngredient": [
+              "Sheet Trays Shop on Amazon",
+              "Whisk",
+              "1 Large Cookie Scoop",
+              "2 cups all-purpose flour",
+              "3/4 teaspoon baking soda",
+              "1/2 cup granulated sugar",
+              "\\u00bd cup diced rhubarb (70 g) 1 tbsp granulated sugar (12 g)",
+              "Chilling the dough is important for these cookies to keep their shape.",
+              "I tested these with store-bought jam."
+            ],
+            "recipeInstructions": ["Mix", "Bake"]
+          }
+        </script>
+      `,
+    });
+
+    const kinds = (recipe?.ingredients ?? []).map((i) => ({ text: i.text, kind: i.kind }));
+
+    // Merged line was split into two real ingredients.
+    expect(kinds.filter((k) => k.kind === "ingredient").map((k) => k.text)).toEqual([
+      "2 cups all-purpose flour",
+      "3/4 teaspoon baking soda",
+      "1/2 cup granulated sugar",
+      "½ cup diced rhubarb (70 g)",
+      "1 tbsp granulated sugar (12 g)",
+    ]);
+    // Equipment/affiliate rows and prose tips routed out (kept, not dropped).
+    expect(kinds.filter((k) => k.kind === "equipment").map((k) => k.text)).toEqual([
+      "Sheet Trays Shop on Amazon",
+      "Whisk",
+      "1 Large Cookie Scoop",
+    ]);
+    expect(kinds.filter((k) => k.kind === "note")).toHaveLength(2);
+    // Nothing lost.
+    expect(kinds).toHaveLength(10);
+  });
+
   test("drops unsafe scraped image URLs during extraction", () => {
     const recipe = extractFromHtml({
       url: "https://example.com/recipe",
