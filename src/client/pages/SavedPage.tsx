@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "../store";
-import { formatDuration, safeImageUrl, usePageTitle } from "../utils";
+import { formatDuration, safeHostname, safeImageUrl, safeOutboundUrl, usePageTitle } from "../utils";
 import { isShoppableIngredient } from "../../shared/ingredient-parser";
 
 export default function SavedPage() {
@@ -108,6 +108,8 @@ export default function SavedPage() {
           const imageUrl = safeImageUrl(recipe.image);
           const isConfirming = confirmingId === recipe.id;
           const isAdded = addedId === recipe.id;
+          const sourceUrl = safeOutboundUrl(recipe.url);
+          const hostname = sourceUrl ? safeHostname(sourceUrl) : null;
           return (
             <Link
               key={recipe.id}
@@ -146,6 +148,22 @@ export default function SavedPage() {
                 )}
               </div>
               <div className="flex items-center gap-1 shrink-0">
+                {sourceUrl && hostname && (
+                  <a
+                    href={sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={`Open ${recipe.title} on ${hostname}`}
+                    className="w-9 h-9 flex items-center justify-center rounded-md text-ink-faint hover:text-olive transition-colors"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4" aria-hidden="true">
+                      <path d="M15 3h6v6" />
+                      <path d="M10 14 21 3" />
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    </svg>
+                  </a>
+                )}
                 <button
                   onClick={(e) => handleAddToGrocery(recipe.id, recipe.title, recipe.ingredients.filter((i) => isShoppableIngredient(i.kind)).map((i) => i.text), e)}
                   aria-label={`Add ${recipe.title} to grocery list`}
